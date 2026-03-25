@@ -1,0 +1,14 @@
+[package]
+name = "ms-term"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "microscope"
+path = "src/main.rs"
+
+[dependencies]
+ms-core.workspace = true
+ms-view.workspace = true
+ms-tui.workspace = true
+crossterm.workspace = true

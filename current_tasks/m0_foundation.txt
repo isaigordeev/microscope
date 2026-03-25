@@ -1,0 +1,28 @@
+M0 — Foundation
+================
+Priority: CURRENT
+Started: 2026-03-25
+
+Goal: Open a file in raw terminal mode, display with line numbers, scroll, quit.
+
+Tasks:
+1. [x] Create DESIGN_DOC.md, current_tasks/, ideas/
+2. [ ] Initialize Cargo workspace with all crate stubs
+3. [ ] ms-tui: crossterm backend, frame buffer, terminal wrapper, Style types
+4. [ ] ms-core: rope wrapper (load file into ropey Rope)
+5. [ ] ms-view: minimal Document, View, Editor structs
+6. [ ] ms-term: event loop, render file with line numbers, j/k scroll, q quit
+
+Verification:
+- cargo build compiles all crates
+- cargo run -- <file> opens file in raw terminal
+- File contents displayed with line numbers
+- j/k scrolls, q quits
+- No crash on empty file, large file, binary file
+
+Key files:
+- Cargo.toml (workspace)
+- ms-tui/src/{backend.rs, buffer.rs, terminal.rs, style.rs}
+- ms-core/src/{lib.rs, rope.rs}
+- ms-view/src/{lib.rs, document.rs, view.rs, editor.rs}
+- ms-term/src/{main.rs, application.rs}

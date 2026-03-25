@@ -1,0 +1,7 @@
+[package]
+name = "ms-lsp"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tokio.workspace = true

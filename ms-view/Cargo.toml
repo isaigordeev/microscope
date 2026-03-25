@@ -1,0 +1,8 @@
+[package]
+name = "ms-view"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ms-core.workspace = true
+ms-event.workspace = true

@@ -1,0 +1,3 @@
+doc-valid-idents = ["GitHub", "GitLab", "JavaScript", "TypeScript", "NeoVim", "TreeSitter"]
+too-many-arguments-threshold = 8
+type-complexity-threshold = 300
