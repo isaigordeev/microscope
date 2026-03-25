@@ -1,6 +1,61 @@
-[package]
-name = "microscope"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = [
+   "ms-core",
+   "ms-view",
+   "ms-term",
+   "ms-tui",
+   "ms-lsp",
+   "ms-git",
+   "ms-event",
+]
+resolver = "2"
 
-[dependencies]
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+ms-core = { path = "ms-core" }
+ms-view = { path = "ms-view" }
+ms-tui = { path = "ms-tui" }
+ms-lsp = { path = "ms-lsp" }
+ms-git = { path = "ms-git" }
+ms-event = { path = "ms-event" }
+
+ropey = "1"
+crossterm = "0.28"
+tokio = { version = "1", features = ["full"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+# Pedantic — strict like your ruff extend-select
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+
+# Security (matches flake8-bandit S)
+unwrap_used = "warn"
+expect_used = "warn"
+
+# No prints (matches flake8-print T20) — use proper logging
+print_stdout = "warn"
+print_stderr = "warn"
+
+# Performance (matches PERF)
+inefficient_to_string = "warn"
+large_enum_variant = "warn"
+
+# Allow reasonable exceptions
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+cast_lossless = "allow"
