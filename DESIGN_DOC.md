@@ -95,6 +95,11 @@ microscope/
 │   ├── transport.rs            Async message framing
 │   └── registry.rs             Server discovery & lifecycle
 │
+├── ms-tree/                    Filesystem tree model
+│   ├── tree.rs                 Tree node structure, expand/collapse
+│   ├── walk.rs                 Directory walking (.gitignore-aware)
+│   └── sort.rs                 Sorting (dirs first, then alpha)
+│
 ├── ms-git/                     Git integration
 │   ├── diff.rs                 Diff provider (gutter signs)
 │   ├── blame.rs                Git blame (popup + sidebar)
@@ -114,7 +119,8 @@ ms-term ──→ ms-view ──→ ms-core
   │            ├──→ ms-git
   │            └──→ ms-event
   │
-  └──→ ms-tui (rendering only)
+  ├──→ ms-tui (rendering only)
+  └──→ ms-tree (filesystem tree model)
 ```
 
 ### Key Dependencies
@@ -274,9 +280,13 @@ Open a file, display with line numbers, scroll (j/k), quit (q).
 ### M1 — Vim Modal Editing
 Normal/Insert/Visual modes, motions, operators, text objects, undo/redo,
 registers, macros, marks, dot repeat.
+Ex command line (`:w`, `:q`, `:wq`, `:q!`, `:s///`, `:%s///`, `:e`, `:set`).
+Search prompts (`/`, `?`, `n`, `N`, `*`, `#`) with incremental highlight.
 
 ### M2 — File Management
-Fuzzy file picker, buffer picker, file tree sidebar, save/open/close buffers.
+Fuzzy file picker, buffer picker, save/open/close buffers.
+`ms-tree` crate: filesystem tree model (walk, sort, .gitignore-aware).
+File tree sidebar (nvim-tree style): toggle, expand/collapse, open file.
 
 ### M3 — Tree-sitter Highlighting
 Syntax highlighting, rainbow delimiters, language detection.
