@@ -12,6 +12,7 @@ ms-core.workspace = true
 ms-view.workspace = true
 ms-tui.workspace = true
 crossterm.workspace = true
+ropey.workspace = true
 
 [lints]
 workspace = true

@@ -124,6 +124,7 @@ dependencies = [
  "ms-core",
  "ms-tui",
  "ms-view",
+ "ropey",
 ]
 
 [[package]]
