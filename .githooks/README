@@ -1,0 +1,24 @@
+
+GIT HOOKS & GPG SIGNING SETUP
+==============================
+
+A lightweight guide to set up local Git hooks and GPG-signed commits
+for secure and consistent workflows.
+
+This configuration ensures every commit follows the correct message
+format and is cryptographically signed.
+
+------------------------------------------------------------------------
+1. Make Git Hooks Executable
+------------------------------------------------------------------------
+
+Enable executable permissions for your local Git hooks:
+
+    > chmod +x .githooks/commit-msg
+    # Optional:
+    # chmod +x .githooks/pre-commit
+    # chmod +x .githooks/pre-push
+
+Tell Git to use your local .githooks directory:
+
+    > git config core.hooksPath .githooks
