@@ -63,7 +63,7 @@ microscope/
 │   ├── theme.rs                Theme system: scope → Style resolver
 │   ├── themes/
 │   │   ├── vs_dark.toml        Built-in dark theme (embedded)
-│   │   └── vs_light.toml       Built-in light theme (embedded)
+│   │   └── vs_light.toml       Built-in light theme
 │   ├── keymap.rs               Vim keymap trie (mode → key → command)
 │   ├── mode.rs                 Vim modes
 │   └── config.rs               Editor config + project-local config
@@ -140,8 +140,9 @@ ms-term ──→ ms-view ──→ ms-core
 - Replace (`:s/foo/bar/g`)
 - Surround operations (`cs"'`, `ds"`, `ysiw"`)
 - Comment toggle (`gcc`, `gc` visual)
-- 3-space tabs default, configurable per-project
+- 4-space indent (Rust standard), configurable per-project
 - Format on save (LSP-based, for rs/go/json)
+- No autopairs
 
 ### Navigation
 - Fuzzy file finder (ripgrep backend)
@@ -259,13 +260,16 @@ User themes from `~/.config/microscope/themes/` override built-ins.
 - **Dirty-flag rendering**: Only re-render when state changes. Frame buffer
   diffing to minimize terminal output.
 
+- **Strict linting**: Clippy pedantic + nursery, no unsafe, no unwrap/expect,
+  no print to stdout/stderr (except main). Matches ruff strict Python style.
+
 ---
 
 ## Milestones
 
-### M0 — Foundation
+### M0 — Foundation ✓
 Rope buffer + terminal raw mode + basic rendering.
-Open a file, display it with line numbers, scroll (j/k), quit (q).
+Open a file, display with line numbers, scroll (j/k), quit (q).
 
 ### M1 — Vim Modal Editing
 Normal/Insert/Visual modes, motions, operators, text objects, undo/redo,
