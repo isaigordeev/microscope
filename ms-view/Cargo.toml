@@ -6,3 +6,7 @@ edition.workspace = true
 [dependencies]
 ms-core.workspace = true
 ms-event.workspace = true
+ropey.workspace = true
+
+[lints]
+workspace = true
