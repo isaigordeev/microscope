@@ -1,0 +1,31 @@
+M4 — LSP
+=========
+Status: TODO (after M3)
+
+Goal: Language Server Protocol client for intelligent editing.
+
+Tasks:
+- [ ] LSP client in ms-lsp crate
+      - JSON-RPC transport (stdin/stdout to server process)
+      - Initialize, capabilities negotiation
+      - Document sync (incremental, using transactions)
+- [ ] Completion
+      - Trigger on typing or manual invoke
+      - Popup menu with items
+      - Accept/dismiss
+- [ ] Go-to-definition (gd)
+- [ ] Hover (K or gh)
+- [ ] Diagnostics
+      - Gutter signs (error/warning/info/hint)
+      - Inline virtual text
+      - :diagnostics list
+- [ ] Format on save
+- [ ] Inlay hints
+- [ ] Code actions
+- [ ] Rename symbol
+- [ ] Semantic tokens (feeds into theme resolution chain:
+      tree-sitter → LSP semantic tokens → UI elements)
+
+Dependencies:
+- lsp-types crate
+- tokio for async communication

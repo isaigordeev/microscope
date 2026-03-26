@@ -1,0 +1,19 @@
+M5 — Git Integration
+=====================
+Status: TODO (after M4)
+
+Goal: Git-aware editing like gitsigns.nvim + fugitive.
+
+Tasks:
+- [ ] ms-git crate: libgit2 or git CLI wrapper
+      - Detect git repo, read HEAD, branches
+      - Diff current buffer against HEAD
+- [ ] Gutter signs (added/modified/deleted lines)
+- [ ] Blame popup (inline, on keypress)
+- [ ] Blame sidebar (full file blame view)
+- [ ] Diff viewer (split view, hunks navigation)
+- [ ] :Git commands (status, log, diff)
+- [ ] Hunk operations (stage hunk, revert hunk)
+
+Dependencies:
+- git2 crate (libgit2 bindings) or shell out to git

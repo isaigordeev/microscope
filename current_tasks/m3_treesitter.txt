@@ -1,0 +1,19 @@
+M3 — Tree-sitter Highlighting
+==============================
+Status: TODO (after M2)
+
+Goal: Syntax highlighting via tree-sitter, language detection.
+
+Tasks:
+- [ ] tree-sitter integration in ms-core
+      - Parser per language
+      - Incremental re-parse on text edits
+      - Map tree-sitter scopes to theme highlight groups
+- [ ] Language detection (extension, shebang, modeline)
+- [ ] Rainbow delimiters (matching parens/brackets colored)
+- [ ] Highlight queries (bundled .scm files per language)
+- [ ] Indent queries (for auto-indent on Enter)
+
+Dependencies:
+- tree-sitter (Rust bindings)
+- tree-sitter-{rust,python,javascript,...} grammars

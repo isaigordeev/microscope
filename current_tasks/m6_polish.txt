@@ -1,0 +1,25 @@
+M6 — Polish
+============
+Status: TODO (after M5)
+
+Goal: Themes, UI refinements, user config, quality of life.
+
+Tasks:
+- [ ] Theme system
+      - vs_dark theme (from user's nvim config)
+      - vs_light theme (from user's nvim config)
+      - Theme file format (TOML, embedded via include_str!)
+      - Resolution chain: tree-sitter → LSP semantic → UI
+- [ ] Breadcrumbs (file path + symbol path at top)
+- [ ] Russian keyboard support (vim commands work in RU layout)
+- [ ] Session management (reopen files/cursor on restart)
+- [ ] Project-local config (.microscope.toml)
+- [ ] Zen UI refinements
+      - No statusline by default (toggle)
+      - Single-tab focus
+      - Minimal chrome
+- [ ] Scrollbar (optional)
+- [ ] Smooth scrolling (Ctrl-d/Ctrl-u animation)
+- [ ] Cursor line highlight
+- [ ] Relative line numbers (toggle)
+- [ ] Whitespace rendering (toggle)

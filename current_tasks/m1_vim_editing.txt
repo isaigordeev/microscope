@@ -1,0 +1,116 @@
+M1 — Vim Modal Editing
+=======================
+Status: IN PROGRESS
+Next up: M1b
+
+Architecture: Enum state machine (VimMachine) in ms-view.
+Each keypress → feed(key) → Option<Action>. No callbacks.
+ms-term translates crossterm KeyEvent → KeyInput, feeds machine,
+executes returned Actions.
+
+---
+
+M1a — Mode System + Basic Motions + Insert Mode + :w/:q   [DONE]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+- Transaction system (ms-core): Retain/Delete/Insert ops, apply, invert
+- Mode enum: Normal, Insert, Command
+- Editor state: mode, command_buffer, status_message
+- View: desired_col (w_curswant), h/l/0/$, column stickiness
+- Document: apply_transaction(), save(), line_col_to_char()
+- Application struct (Helix pattern): owns editor + terminal
+- Async event loop: stream-based via crossterm EventStream, no polling
+- Normal mode: h/j/k/l, 0/$, ^, w/W/b/B/e/E, gg/G, i/a/A/I/o/O, x, :
+- Insert mode: typing, Enter, Backspace, Delete, arrows, Ctrl-w, Ctrl-u
+- Command mode: :w, :q, :wq, :q!, :x
+- Rendering: gutter, text, status bar, mode indicator, cursor shape
+
+---
+
+M1b — Operators + Vim Grammar State Machine               [TODO]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+New: ms-view/src/command.rs — VimMachine, VimState, Action,
+     Operator, Motion enums
+
+Key types:
+  Operator: Delete, Change, Yank, Indent, Dedent, Lowercase,
+            Uppercase, ToggleCase
+  Motion:   all from M1a + ParagraphForward/Back, FindChar,
+            TillChar, MatchBracket, H/M/L
+  MotionType: Charwise, Linewise, Blockwise
+  MotionResult: { range, motion_type, inclusive }
+  Action:   Move, OperatorMotion, EnterInsert, EnterCommand,
+            Special, Undo, Redo, DotRepeat
+  VimState: Normal, Count, OperatorPending, OperatorCount,
+            WaitingChar, WaitingSecondKey
+
+Grammar: [count] operator [count] motion
+         operator operator (dd/yy/cc)
+         special commands (x, X, s, S, r{char}, J, ~, o, O,
+                           a, A, I, C, D, Y, >>, <<, p, P)
+
+Editor additions: typeahead: VecDeque<KeyInput> (macro replay)
+
+Verify: d2w deletes 2 words, 3dd deletes 3 lines, yy+p pastes
+
+---
+
+M1c — Text Objects + Visual Mode + Selections             [TODO]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+New: ms-core/src/textobject.rs — find_textobject()
+     ms-core/src/selection.rs — Range (anchor/head), Selection
+
+Text objects: iw, aw, iW, aW, is, as, ip, ap,
+              i"/a", i'/a', i`/a`, i(/a(, i[/a[, i{/a{, i</a<
+Visual: v (charwise), V (linewise), Ctrl-V (blockwise)
+Mode additions: Visual, VisualLine, VisualBlock
+
+Verify: ci" changes inside quotes, viw selects word, Vjjd deletes
+
+---
+
+M1d — Undo/Redo Tree + Registers                          [TODO]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+New: ms-core/src/history.rs — tree-based undo
+     ms-core/src/register.rs — RegisterStore
+
+Undo tree: nodes with parent/children, inversion
+Registers: named ("a-z), unnamed (""), numbered ("0-9),
+           clipboard ("+), black hole ("_)
+Dep: arboard (clipboard, feature-gated)
+
+Verify: u undoes, Ctrl-R redoes, "ayy + "ap works, branch undo
+
+---
+
+M1e — Search + Marks                                       [TODO]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+New: ms-core/src/search.rs — regex search over rope (ripgrep)
+
+Search: /pattern, ?pattern, n, N, *, #, incremental highlight
+Marks: m{a-z}, '{a-z}, `{a-z}
+Find char: f/F/t/T/;/, (wired in M1b, implemented here)
+Mode additions: Search { direction }
+Dep: grep-regex + grep-searcher (ripgrep crates)
+
+Verify: /fn highlights, n cycles, * searches word, ma + 'a jumps
+
+---
+
+M1f — Macros + Dot Repeat                                 [TODO]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+MacroStore: q{a-z} record, q stop, @{a-z} play, @@ repeat
+DotRepeat: . replays last text-changing Action + insert keys
+
+Verify: qa0dwjq → @a replays, dw → . deletes another word
+
+---
+
+M1g — Ex Command Line (full) + Polish                     [TODO]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+New: ms-view/src/command_line.rs — ExCommand parser
+
+Ex commands: :s/pat/rep/flags, :%s/..., :1,5d, :e file, :set
+Line ranges: . (current), % (whole), single, range, '<,'>
+Command history: up/down cycles previous commands
+
+Verify: :%s/foo/bar/g replaces all, :1,5d deletes lines

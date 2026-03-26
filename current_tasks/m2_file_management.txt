@@ -1,0 +1,31 @@
+M2 — File Management
+=====================
+Status: TODO (after M1)
+
+Goal: Multi-buffer editing, fuzzy picker, file tree sidebar.
+
+Tasks:
+- [ ] ms-tree crate: filesystem tree model
+      - Directory walking, sorting, .gitignore-aware filtering
+      - Tree data structure (expand/collapse nodes)
+      - Watch for filesystem changes (notify crate?)
+- [ ] File tree sidebar (nvim-tree style)
+      - Toggle show/hide
+      - Expand/collapse directories
+      - Open file from tree
+      - Create/delete/rename files
+- [ ] Buffer management
+      - Multiple open buffers (SlotMap<DocumentId, Document>)
+      - Buffer picker (:ls, :b, :bn, :bp)
+      - Close buffer (:bd)
+      - Switch between buffers
+- [ ] Fuzzy file picker
+      - Walk project files (respect .gitignore)
+      - Fuzzy matching algorithm
+      - Overlay UI (like telescope.nvim)
+- [ ] :e file — open file from command line
+
+Key files:
+- ms-tree/src/lib.rs (new crate)
+- ms-view/src/editor.rs — multi-document state
+- ms-term/src/application.rs — tree sidebar rendering

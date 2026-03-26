@@ -1,0 +1,79 @@
+Ideas & Backlog
+================
+Not committed to any milestone. May promote to tasks later.
+
+--- Architecture ---
+
+- Compositor pattern (Helix-style): Z-ordered UI layer stack,
+  events propagate top→bottom. Needed for pickers, popups,
+  completion overlays. Should land before M2 fuzzy picker.
+
+- Dirty-flag rendering: only re-render on state change.
+  Buffer diff to minimize terminal writes. Currently we
+  re-render full screen every event — fine for now.
+
+- SlotMap for documents/views: stable IDs instead of
+  Vec index. Required when we go multi-buffer in M2.
+
+- Trie-based keymaps: key sequences in a trie for prefix
+  matching. Supports multi-key commands (gg, ci", <leader>gs).
+  Alternative to current flat match in handle_normal().
+
+--- Features ---
+
+- Splits: horizontal/vertical window splits. Low priority
+  (user rarely uses) but architecture should support it.
+  SlotMap<ViewId, View> with layout tree.
+
+- Jumplist: Ctrl-o / Ctrl-i navigation history (vim's jumplist).
+  Track cursor positions across files.
+
+- Quickfix list: :copen, :cnext, :cprev for compiler errors,
+  grep results, etc.
+
+- Terminal emulator: :term to open embedded terminal.
+  Could use portable-pty or vte crate.
+
+- Folding: code folding based on tree-sitter or indent level.
+  za/zo/zc/zM/zR.
+
+- Snippets: simple snippet expansion (like UltiSnips).
+  Probably not worth the complexity without plugins.
+
+- Multi-cursor: Helix-style multiple selections.
+  Conflicts with vim philosophy — probably skip.
+
+- Auto-indent: on Enter, match indent of previous line or
+  use tree-sitter indent queries. Basic version in M1a
+  (not yet implemented), full in M3.
+
+- Wrap/nowrap: long line wrapping modes. Currently truncates.
+
+- Mouse support: click to position cursor, scroll wheel,
+  selection. Low priority (vim users don't mouse).
+
+--- Tooling ---
+
+- CI: GitHub Actions for cargo build + clippy + test on
+  push/PR. Should set up early.
+
+- Benchmarks: cargo bench for rope operations, rendering.
+  Not needed yet but good to have baseline.
+
+- Integration tests: headless terminal testing. Helix has
+  a test framework that feeds key sequences and asserts
+  buffer state. We should build something similar for M1b.
+
+--- Themes (from user's nvim config) ---
+
+vs_dark palette:
+  bg=#1e1e1e  fg=#d4d4d4  cursor=#aeafad
+  comment=#6a9955  string=#ce9178  keyword=#569cd6
+  function=#dcdcaa  type=#4ec9b0  number=#b5cea8
+  error=#f44747  warning=#ff8800  info=#75beff
+
+vs_light palette:
+  bg=#ffffff  fg=#000000  cursor=#000000
+  comment=#008000  string=#a31515  keyword=#0000ff
+  function=#795e26  type=#267f99  number=#098658
+  error=#e51400  warning=#bf8803  info=#1a85ff
