@@ -29,6 +29,7 @@ impl Transaction {
         }
     }
 
+    #[must_use]
     pub const fn with_cursor(
         mut self,
         line: usize,
@@ -127,6 +128,7 @@ impl Transaction {
     /// Create the inverse transaction (for undo).
     /// Requires the rope state *before* this transaction
     /// was applied.
+    #[must_use]
     pub fn invert(&self, rope: &Rope) -> Self {
         let mut inv_ops = Vec::new();
         let mut pos: usize = 0;

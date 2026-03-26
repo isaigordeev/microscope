@@ -23,8 +23,10 @@ ms-git = { path = "ms-git" }
 ms-event = { path = "ms-event" }
 
 ropey = "1"
-crossterm = "0.28"
+crossterm = { version = "0.28", features = ["event-stream"] }
 tokio = { version = "1", features = ["full"] }
+futures-core = "0.3"
+tokio-stream = "0.1"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

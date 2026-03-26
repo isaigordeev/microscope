@@ -1,11 +1,11 @@
 use std::io;
-use std::time::Duration;
 
 use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{
-    self, Event, KeyCode, KeyEvent, KeyModifiers,
+    Event, EventStream, KeyCode, KeyEvent, KeyModifiers,
 };
 use crossterm::execute;
+use futures_core::Stream;
 
 use ms_core::transaction::Transaction;
 use ms_tui::style::{Color, Style};
@@ -15,59 +15,251 @@ use ms_view::mode::Mode;
 
 const GUTTER_WIDTH: u16 = 6;
 
-/// Run the main event loop.
-///
-/// # Errors
-/// Returns IO error on terminal or rendering failure.
-pub(super) fn run(
-    mut editor: Editor,
-) -> io::Result<()> {
-    let mut terminal = Terminal::stdout()?;
-    terminal.setup()?;
-
-    // Set initial height
-    editor.view.height =
-        terminal.area().height.saturating_sub(1);
-
-    let result = event_loop(&mut editor, &mut terminal);
-
-    terminal.teardown()?;
-    result
+pub(crate) struct Application {
+    editor: Editor,
+    terminal: Terminal,
 }
 
-fn event_loop(
-    editor: &mut Editor,
-    terminal: &mut Terminal,
-) -> io::Result<()> {
-    loop {
-        render(editor, terminal)?;
+impl Application {
+    /// # Errors
+    /// Returns IO error if terminal cannot be created.
+    pub(crate) fn new(editor: Editor) -> io::Result<Self> {
+        let terminal = Terminal::stdout()?;
+        Ok(Self { editor, terminal })
+    }
 
-        if event::poll(Duration::from_millis(50))? {
-            match event::read()? {
+    /// Create an event stream from the terminal
+    /// backend. Wraps crossterm's `EventStream`.
+    #[allow(clippy::unused_self)]
+    pub(crate) fn event_stream(&self) -> EventStream {
+        EventStream::new()
+    }
+
+    /// Run the editor: claim terminal, drive event
+    /// loop, then restore.
+    ///
+    /// # Errors
+    /// Returns IO error on terminal or rendering
+    /// failure.
+    pub(crate) async fn run<S>(
+        &mut self,
+        input_stream: &mut S,
+    ) -> io::Result<()>
+    where
+        S: Stream<Item = io::Result<Event>> + Unpin,
+    {
+        self.terminal.setup()?;
+        self.editor.view.height =
+            self.terminal.area().height.saturating_sub(1);
+
+        let result = self.event_loop(input_stream).await;
+
+        self.terminal.teardown()?;
+        result
+    }
+
+    async fn event_loop<S>(
+        &mut self,
+        input_stream: &mut S,
+    ) -> io::Result<()>
+    where
+        S: Stream<Item = io::Result<Event>> + Unpin,
+    {
+        use tokio_stream::StreamExt;
+
+        self.render()?;
+
+        loop {
+            if self.editor.should_quit {
+                return Ok(());
+            }
+
+            let Some(event_result) =
+                input_stream.next().await
+            else {
+                return Ok(());
+            };
+
+            match event_result? {
                 Event::Key(key) => {
-                    editor.status_message = None;
-                    handle_key(editor, key)?;
+                    self.editor.status_message = None;
+                    handle_key(&mut self.editor, key);
                 }
                 Event::Resize(_, _) => {
-                    terminal.resize()?;
-                    editor.view.height =
-                        terminal.area().height
-                            .saturating_sub(1);
+                    self.terminal.resize()?;
+                    self.editor.view.height = self
+                        .terminal
+                        .area()
+                        .height
+                        .saturating_sub(1);
                 }
                 _ => {}
             }
-        }
 
-        if editor.should_quit {
-            return Ok(());
+            self.render()?;
         }
+    }
+
+    fn render(&mut self) -> io::Result<()> {
+        let area = self.terminal.area();
+        self.terminal.buffer.clear();
+
+        let line_num_style = Style::default()
+            .fg(Color::Rgb(0x6B, 0x6B, 0x6B));
+        let text_style = Style::default()
+            .fg(Color::Rgb(0xD4, 0xD4, 0xD4));
+        let cursor_ln_style = Style::default()
+            .fg(Color::Rgb(0xD4, 0xD4, 0xD4));
+        let status_style = Style::default()
+            .fg(Color::Rgb(0x00, 0x00, 0x00))
+            .bg(Color::Rgb(0xD4, 0xD4, 0xD4));
+
+        let text_height = area.height.saturating_sub(1);
+
+        self.render_lines(
+            text_height,
+            area,
+            line_num_style,
+            cursor_ln_style,
+            text_style,
+        );
+
+        self.render_status_bar(area, status_style);
+
+        self.terminal.flush()?;
+
+        let cursor_x = GUTTER_WIDTH
+            + self.editor.view.cursor_col as u16;
+        let cursor_y =
+            self.editor.view.cursor_screen_row();
+
+        let cursor_style = match self.editor.mode {
+            Mode::Normal => SetCursorStyle::SteadyBlock,
+            Mode::Insert | Mode::Command => {
+                SetCursorStyle::SteadyBar
+            }
+        };
+        execute!(io::stdout(), cursor_style)?;
+        self.terminal.set_cursor(cursor_x, cursor_y)?;
+
+        Ok(())
+    }
+
+    fn render_lines(
+        &mut self,
+        text_height: u16,
+        area: ms_tui::buffer::Rect,
+        line_num_style: Style,
+        cursor_ln_style: Style,
+        text_style: Style,
+    ) {
+        for row in 0..text_height {
+            let doc_line = self.editor.view.scroll_offset
+                + row as usize;
+
+            if let Some(line) =
+                self.editor.document.line(doc_line)
+            {
+                let num_str =
+                    format!("{:>4} ", doc_line + 1);
+                let ln_style = if doc_line
+                    == self.editor.view.cursor_line
+                {
+                    cursor_ln_style
+                } else {
+                    line_num_style
+                };
+                self.terminal.buffer.put_str(
+                    0, row, &num_str, ln_style,
+                );
+
+                let line_text: String = line
+                    .chars()
+                    .take_while(|c| *c != '\n')
+                    .collect();
+                let max_cols = area
+                    .width
+                    .saturating_sub(GUTTER_WIDTH);
+                let truncated: String = line_text
+                    .chars()
+                    .take(max_cols as usize)
+                    .collect();
+                self.terminal.buffer.put_str(
+                    GUTTER_WIDTH,
+                    row,
+                    &truncated,
+                    text_style,
+                );
+            } else {
+                self.terminal.buffer.put_str(
+                    0, row, "~", line_num_style,
+                );
+            }
+        }
+    }
+
+    fn render_status_bar(
+        &mut self,
+        area: ms_tui::buffer::Rect,
+        status_style: Style,
+    ) {
+        let status_row = area.height - 1;
+        let status_text = match self.editor.mode {
+            Mode::Command => {
+                format!(
+                    ":{}",
+                    self.editor.command_buffer
+                )
+            }
+            _ => build_status_line(&self.editor, area),
+        };
+        self.terminal.buffer.put_str(
+            0, status_row, &status_text, status_style,
+        );
     }
 }
 
-fn handle_key(
-    editor: &mut Editor,
-    key: KeyEvent,
-) -> io::Result<()> {
+fn build_status_line(
+    editor: &Editor,
+    area: ms_tui::buffer::Rect,
+) -> String {
+    if let Some(ref msg) = editor.status_message {
+        return msg.clone();
+    }
+
+    let file_name = editor
+        .document
+        .path
+        .as_ref()
+        .map_or("[scratch]", |p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("[scratch]")
+        });
+    let modified =
+        if editor.document.modified { "[+]" } else { "" };
+    let mode_name = editor.mode.display_name();
+    let pos = format!(
+        "{}:{} ",
+        editor.view.cursor_line + 1,
+        editor.view.cursor_col + 1,
+    );
+    format!(
+        " -- {mode_name} -- {file_name}{modified}\
+         {:>width$}",
+        pos,
+        width = (area.width as usize).saturating_sub(
+            mode_name.len()
+                + file_name.len()
+                + modified.len()
+                + 8
+        ),
+    )
+}
+
+// ----- Key dispatch -----
+
+fn handle_key(editor: &mut Editor, key: KeyEvent) {
     match editor.mode {
         Mode::Normal => handle_normal(editor, key),
         Mode::Insert => handle_insert(editor, key),
@@ -75,12 +267,8 @@ fn handle_key(
     }
 }
 
-fn handle_normal(
-    editor: &mut Editor,
-    key: KeyEvent,
-) -> io::Result<()> {
+fn handle_normal(editor: &mut Editor, key: KeyEvent) {
     match key.code {
-        // Motions
         KeyCode::Char('h') | KeyCode::Left => {
             editor.view.move_left();
         }
@@ -152,15 +340,13 @@ fn handle_normal(
 
         // Enter insert mode
         KeyCode::Char('i') => editor.enter_insert(),
-        KeyCode::Char('a') => editor.enter_insert_after(),
+        KeyCode::Char('a') => {
+            editor.enter_insert_after();
+        }
         KeyCode::Char('A') => editor.enter_insert_eol(),
         KeyCode::Char('I') => editor.enter_insert_bol(),
-        KeyCode::Char('o') => {
-            open_line_below(editor);
-        }
-        KeyCode::Char('O') => {
-            open_line_above(editor);
-        }
+        KeyCode::Char('o') => open_line_below(editor),
+        KeyCode::Char('O') => open_line_above(editor),
 
         // Command mode
         KeyCode::Char(':') => editor.enter_command(),
@@ -172,23 +358,27 @@ fn handle_normal(
 
         _ => {}
     }
-    Ok(())
 }
 
-fn handle_insert(
-    editor: &mut Editor,
-    key: KeyEvent,
-) -> io::Result<()> {
+fn handle_insert(editor: &mut Editor, key: KeyEvent) {
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('w') => {
+                delete_word_back(editor);
+                return;
+            }
+            KeyCode::Char('u') => {
+                delete_to_line_start(editor);
+                return;
+            }
+            _ => {}
+        }
+    }
+
     match key.code {
-        KeyCode::Esc => {
-            editor.enter_normal();
-        }
-        KeyCode::Char(c) => {
-            insert_char(editor, c);
-        }
-        KeyCode::Enter => {
-            insert_newline(editor);
-        }
+        KeyCode::Esc => editor.enter_normal(),
+        KeyCode::Char(c) => insert_char(editor, c),
+        KeyCode::Enter => insert_newline(editor),
         KeyCode::Backspace => {
             delete_char_before_cursor(editor);
         }
@@ -211,39 +401,17 @@ fn handle_insert(
                 .view
                 .move_down(max, |line| doc.line_len(line));
         }
-        // Ctrl-w: delete word back
-        _ if key.code == KeyCode::Char('w')
-            && key
-                .modifiers
-                .contains(KeyModifiers::CONTROL) =>
-        {
-            delete_word_back(editor);
-        }
-        // Ctrl-u: delete to line start
-        _ if key.code == KeyCode::Char('u')
-            && key
-                .modifiers
-                .contains(KeyModifiers::CONTROL) =>
-        {
-            delete_to_line_start(editor);
-        }
         _ => {}
     }
-    Ok(())
 }
 
-fn handle_command(
-    editor: &mut Editor,
-    key: KeyEvent,
-) -> io::Result<()> {
+fn handle_command(editor: &mut Editor, key: KeyEvent) {
     match key.code {
-        KeyCode::Esc => {
-            editor.enter_normal();
-        }
+        KeyCode::Esc => editor.enter_normal(),
         KeyCode::Enter => {
             let cmd = editor.command_buffer.clone();
             editor.enter_normal();
-            execute_command(editor, &cmd)?;
+            execute_command(editor, &cmd);
         }
         KeyCode::Backspace => {
             if editor.command_buffer.is_empty() {
@@ -257,13 +425,9 @@ fn handle_command(
         }
         _ => {}
     }
-    Ok(())
 }
 
-fn execute_command(
-    editor: &mut Editor,
-    cmd: &str,
-) -> io::Result<()> {
+fn execute_command(editor: &mut Editor, cmd: &str) {
     let cmd = cmd.trim();
     match cmd {
         "q" => {
@@ -286,8 +450,8 @@ fn execute_command(
                     .document
                     .path
                     .as_ref()
-                    .map_or(
-                        "[scratch]".to_owned(),
+                    .map_or_else(
+                        || "[scratch]".to_owned(),
                         |p| p.display().to_string(),
                     );
                 editor.status_message =
@@ -312,10 +476,9 @@ fn execute_command(
             ));
         }
     }
-    Ok(())
 }
 
-// --- Text mutation helpers ---
+// ----- Text mutation helpers -----
 
 fn insert_char(editor: &mut Editor, c: char) {
     let pos = editor.document.line_col_to_char(
@@ -353,14 +516,12 @@ fn delete_char_before_cursor(editor: &mut Editor) {
     }
 
     if editor.view.cursor_col == 0 {
-        // Join with previous line
         let prev_line = editor.view.cursor_line - 1;
         let prev_len = editor.document.line_len(prev_line);
         let pos = editor.document.line_col_to_char(
             editor.view.cursor_line,
             0,
         );
-        // Delete the newline before this line
         let txn = Transaction::delete(pos - 1, 1);
         if editor
             .document
@@ -443,20 +604,10 @@ fn delete_to_line_start(editor: &mut Editor) {
 
 fn open_line_below(editor: &mut Editor) {
     let line = editor.view.cursor_line;
-    let line_end = editor
-        .document
-        .line_col_to_char(line, editor.document.line_len(line));
-    // Insert newline at end of current line (before the
-    // existing newline if present)
-    let pos = if editor.document.line(line).is_some_and(
-        |l| {
-            l.chars().last() == Some('\n')
-        },
-    ) {
-        line_end
-    } else {
-        line_end
-    };
+    let pos = editor.document.line_col_to_char(
+        line,
+        editor.document.line_len(line),
+    );
     let txn = Transaction::insert(pos, "\n");
     if editor.document.apply_transaction(&txn).is_ok() {
         editor.view.cursor_line = line + 1;
@@ -473,8 +624,6 @@ fn open_line_above(editor: &mut Editor) {
         editor.document.line_col_to_char(line, 0);
     let txn = Transaction::insert(pos, "\n");
     if editor.document.apply_transaction(&txn).is_ok() {
-        // Cursor stays at the same line (now the new
-        // empty line)
         editor.view.cursor_col = 0;
         editor.view.desired_col = 0;
         editor.mode = Mode::Insert;
@@ -482,7 +631,7 @@ fn open_line_above(editor: &mut Editor) {
     }
 }
 
-// --- Word motion helpers ---
+// ----- Word motion helpers -----
 
 fn move_word_forward(editor: &mut Editor, big: bool) {
     let text = &editor.document.text;
@@ -526,7 +675,6 @@ fn move_word_end(editor: &mut Editor, big: bool) {
     editor.view.ensure_cursor_visible();
 }
 
-/// Find the next word start (vim `w`/`W`).
 fn next_word_start(
     text: &ropey::Rope,
     pos: usize,
@@ -537,22 +685,18 @@ fn next_word_start(
         return pos;
     }
     let mut i = pos;
-    let ch = text.char(i);
-    let cat = char_category(ch, big);
+    let cat = char_category(text.char(i), big);
 
-    // Skip current word
     while i < len && char_category(text.char(i), big) == cat
     {
         i += 1;
     }
-    // Skip whitespace
     while i < len && text.char(i).is_whitespace() {
         i += 1;
     }
     i.min(len.saturating_sub(1))
 }
 
-/// Find the previous word start (vim `b`/`B`).
 fn prev_word_start(
     text: &ropey::Rope,
     pos: usize,
@@ -563,14 +707,12 @@ fn prev_word_start(
     }
     let mut i = pos - 1;
 
-    // Skip whitespace backward
     while i > 0 && text.char(i).is_whitespace() {
         i -= 1;
     }
 
     let cat = char_category(text.char(i), big);
 
-    // Skip same-category chars backward
     while i > 0
         && char_category(text.char(i - 1), big) == cat
     {
@@ -579,7 +721,6 @@ fn prev_word_start(
     i
 }
 
-/// Find the next word end (vim `e`/`E`).
 fn next_word_end(
     text: &ropey::Rope,
     pos: usize,
@@ -591,7 +732,6 @@ fn next_word_end(
     }
     let mut i = pos + 1;
 
-    // Skip whitespace
     while i < len && text.char(i).is_whitespace() {
         i += 1;
     }
@@ -602,7 +742,6 @@ fn next_word_end(
 
     let cat = char_category(text.char(i), big);
 
-    // Skip same-category chars
     while i + 1 < len
         && char_category(text.char(i + 1), big) == cat
     {
@@ -621,7 +760,6 @@ fn find_word_start_back(
     let new_pos = prev_word_start(text, pos, false);
     let line_start =
         editor.document.line_col_to_char(line, 0);
-    // Don't go before the start of the current line
     new_pos.saturating_sub(line_start)
 }
 
@@ -635,155 +773,9 @@ enum CharCat {
 fn char_category(c: char, big: bool) -> CharCat {
     if c.is_whitespace() {
         CharCat::Whitespace
-    } else if big {
-        // W/B/E: everything non-whitespace is one
-        // category
-        CharCat::Word
-    } else if c.is_alphanumeric() || c == '_' {
+    } else if big || c.is_alphanumeric() || c == '_' {
         CharCat::Word
     } else {
         CharCat::Punct
     }
-}
-
-// --- Rendering ---
-
-fn render(
-    editor: &Editor,
-    terminal: &mut Terminal,
-) -> io::Result<()> {
-    let area = terminal.area();
-    terminal.buffer.clear();
-
-    let line_num_style = Style::default()
-        .fg(Color::Rgb(0x6B, 0x6B, 0x6B));
-    let text_style = Style::default()
-        .fg(Color::Rgb(0xD4, 0xD4, 0xD4));
-    let cursor_line_num_style = Style::default()
-        .fg(Color::Rgb(0xD4, 0xD4, 0xD4));
-    let status_style = Style::default()
-        .fg(Color::Rgb(0x00, 0x00, 0x00))
-        .bg(Color::Rgb(0xD4, 0xD4, 0xD4));
-
-    // Reserve bottom line for status/command
-    let text_height = area.height.saturating_sub(1);
-
-    for row in 0..text_height {
-        let doc_line =
-            editor.view.scroll_offset + row as usize;
-
-        if let Some(line) =
-            editor.document.line(doc_line)
-        {
-            let num_str =
-                format!("{:>4} ", doc_line + 1);
-            let ln_style =
-                if doc_line == editor.view.cursor_line {
-                    cursor_line_num_style
-                } else {
-                    line_num_style
-                };
-            terminal.buffer.put_str(
-                0, row, &num_str, ln_style,
-            );
-
-            let line_text: String = line
-                .chars()
-                .take_while(|c| *c != '\n')
-                .collect();
-            let max_cols =
-                area.width.saturating_sub(GUTTER_WIDTH);
-            let truncated: String = line_text
-                .chars()
-                .take(max_cols as usize)
-                .collect();
-            terminal.buffer.put_str(
-                GUTTER_WIDTH,
-                row,
-                &truncated,
-                text_style,
-            );
-        } else {
-            terminal.buffer.put_str(
-                0,
-                row,
-                "~",
-                line_num_style,
-            );
-        }
-    }
-
-    // Status bar / command line
-    let status_row = area.height - 1;
-    let status_text = match editor.mode {
-        Mode::Command => {
-            format!(":{}", editor.command_buffer)
-        }
-        _ => {
-            if let Some(ref msg) = editor.status_message {
-                msg.clone()
-            } else {
-                let file_name = editor
-                    .document
-                    .path
-                    .as_ref()
-                    .map_or("[scratch]", |p| {
-                        p.file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("[scratch]")
-                    });
-                let modified_indicator = if editor
-                    .document
-                    .modified
-                {
-                    "[+]"
-                } else {
-                    ""
-                };
-                let mode_name =
-                    editor.mode.display_name();
-                let pos = format!(
-                    "{}:{} ",
-                    editor.view.cursor_line + 1,
-                    editor.view.cursor_col + 1,
-                );
-                format!(
-                    " -- {mode_name} -- \
-                     {file_name}{modified_indicator}\
-                     {:>width$}",
-                    pos,
-                    width = (area.width as usize)
-                        .saturating_sub(
-                            mode_name.len()
-                                + file_name.len()
-                                + modified_indicator.len()
-                                + 8
-                        ),
-                )
-            }
-        }
-    };
-    terminal.buffer.put_str(
-        0,
-        status_row,
-        &status_text,
-        status_style,
-    );
-
-    terminal.flush()?;
-
-    // Cursor position and shape
-    let cursor_x =
-        GUTTER_WIDTH + editor.view.cursor_col as u16;
-    let cursor_y = editor.view.cursor_screen_row();
-
-    let cursor_style = match editor.mode {
-        Mode::Normal => SetCursorStyle::SteadyBlock,
-        Mode::Insert => SetCursorStyle::SteadyBar,
-        Mode::Command => SetCursorStyle::SteadyBar,
-    };
-    execute!(io::stdout(), cursor_style)?;
-    terminal.set_cursor(cursor_x, cursor_y)?;
-
-    Ok(())
 }
