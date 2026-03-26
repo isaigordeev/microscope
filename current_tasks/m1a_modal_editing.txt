@@ -1,0 +1,17 @@
+M1a — Mode System + Basic Motions + Insert Mode + :w/:q
+=======================================================
+Status: DONE
+
+Completed:
+- [x] Transaction system (ms-core): Retain/Delete/Insert ops, apply, invert
+- [x] Mode enum: Normal, Insert, Command
+- [x] Editor state: mode, command_buffer, status_message
+- [x] View: desired_col (vim w_curswant), h/l/0/$, column stickiness
+- [x] Document: apply_transaction(), save(), line_col_to_char()
+- [x] Application struct (Helix pattern): owns editor + terminal
+- [x] Async event loop: stream-based via crossterm EventStream, no polling
+- [x] Normal mode: h/j/k/l, 0/$, ^, w/W/b/B/e/E, gg/G, i/a/A/I/o/O, x, :
+- [x] Insert mode: typing, Enter, Backspace, Delete, arrows, Ctrl-w, Ctrl-u
+- [x] Command mode: :w, :q, :wq, :q!, :x
+- [x] Rendering: gutter, text, status bar, mode indicator, cursor shape
+- [x] Zero clippy warnings, all tests pass

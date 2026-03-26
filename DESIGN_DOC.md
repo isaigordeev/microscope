@@ -248,8 +248,13 @@ User themes from `~/.config/microscope/themes/` override built-ins.
 - **Rope buffer** (ropey): O(log n) insert/delete, efficient for large files.
   Same approach as Helix.
 
-- **Async event loop** (tokio): Single-threaded rendering with async I/O for
-  LSP, git, and file operations. Like Helix's tokio::select! multiplexing.
+- **Async stream-based event loop** (tokio + crossterm EventStream): No
+  polling — the loop awaits on an event stream directly via
+  `stream.next().await`. Follows Helix's Application pattern:
+  `Application::new()` owns editor + terminal, `app.event_stream()` creates
+  the stream from the terminal backend, `app.run(&mut stream).await` drives
+  the loop. Will expand to `tokio::select!` with multiple branches (signals,
+  LSP, jobs) as those features land.
 
 - **Compositor pattern**: Z-ordered stack of UI layers. Events propagate top
   to bottom. Same as Helix. Allows picker/popup/completion to overlay editor.
