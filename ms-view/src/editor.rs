@@ -121,3 +121,114 @@ impl Editor {
             })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::Document;
+    use ropey::Rope;
+
+    fn editor(text: &str) -> Editor {
+        let doc = Document {
+            text: Rope::from(text),
+            path: None,
+            modified: false,
+        };
+        Editor::new(doc, 24)
+    }
+
+    #[test]
+    fn initial_mode_is_normal() {
+        let e = editor("hello");
+        assert_eq!(e.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn enter_insert_and_back() {
+        let mut e = editor("hello");
+        e.enter_insert();
+        assert_eq!(e.mode, Mode::Insert);
+        e.enter_normal();
+        assert_eq!(e.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn enter_insert_after_advances_col() {
+        let mut e = editor("hello");
+        e.view.cursor_col = 2;
+        e.enter_insert_after();
+        assert_eq!(e.mode, Mode::Insert);
+        assert_eq!(e.view.cursor_col, 3);
+    }
+
+    #[test]
+    fn enter_insert_eol() {
+        let mut e = editor("hello");
+        e.enter_insert_eol();
+        assert_eq!(e.mode, Mode::Insert);
+        assert_eq!(e.view.cursor_col, 5);
+    }
+
+    #[test]
+    fn enter_insert_bol_skips_whitespace() {
+        let mut e = editor("    hello");
+        e.enter_insert_bol();
+        assert_eq!(e.mode, Mode::Insert);
+        assert_eq!(e.view.cursor_col, 4);
+    }
+
+    #[test]
+    fn enter_command_clears_buffer() {
+        let mut e = editor("hello");
+        e.command_buffer = "old".to_owned();
+        e.enter_command();
+        assert_eq!(e.mode, Mode::Command);
+        assert!(e.command_buffer.is_empty());
+    }
+
+    #[test]
+    fn clamp_cursor_col_normal_mode() {
+        let mut e = editor("hello");
+        e.view.cursor_col = 99;
+        e.clamp_cursor_col();
+        // Normal mode: max is len-1 = 4
+        assert_eq!(e.view.cursor_col, 4);
+    }
+
+    #[test]
+    fn clamp_cursor_col_insert_mode() {
+        let mut e = editor("hello");
+        e.mode = Mode::Insert;
+        e.view.cursor_col = 99;
+        e.clamp_cursor_col();
+        // Insert mode: max is len = 5
+        assert_eq!(e.view.cursor_col, 5);
+    }
+
+    #[test]
+    fn max_line() {
+        let e = editor("line1\nline2\nline3");
+        assert_eq!(e.max_line(), 2);
+    }
+
+    #[test]
+    fn first_non_blank_col_works() {
+        let e = editor("  \thello");
+        assert_eq!(e.first_non_blank_col(0), 3);
+    }
+
+    #[test]
+    fn current_line_len_excludes_newline() {
+        let e = editor("hello\nworld");
+        assert_eq!(e.current_line_len(), 5);
+    }
+
+    #[test]
+    fn enter_normal_clamps_col() {
+        let mut e = editor("hello");
+        e.mode = Mode::Insert;
+        e.view.cursor_col = 5; // past last char
+        e.enter_normal();
+        assert_eq!(e.view.cursor_col, 4);
+    }
+}

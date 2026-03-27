@@ -13,7 +13,8 @@ workflow.
 3. [Feature Set](#feature-set)
 4. [Theme System](#theme-system)
 5. [Key Design Decisions](#key-design-decisions)
-6. [Milestones](#milestones)
+6. [Testing Strategy](#testing-strategy)
+7. [Milestones](#milestones)
 
 ---
 
@@ -273,6 +274,61 @@ User themes from `~/.config/microscope/themes/` override built-ins.
 
 - **Strict linting**: Clippy pedantic + nursery, no unsafe, no unwrap/expect,
   no print to stdout/stderr (except main). Matches ruff strict Python style.
+
+---
+
+## Testing Strategy
+
+Every module must have test coverage. Adopted from Helix's testing
+architecture, adapted for Microscope.
+
+### Two-tier approach
+
+1. **Unit tests** — inline `#[cfg(test)]` modules in each source file.
+   Test pure logic close to where it lives: transactions, selections,
+   motions, view scrolling, mode transitions, document operations.
+
+2. **Integration tests** — in `ms-term/tests/`, feature-gated behind
+   `integration`. Spin up a headless `Editor`, send key sequences,
+   assert final text + cursor state. Tests the full dispatch path
+   without a real terminal.
+
+### Annotated selection syntax
+
+Test cases use an annotation format for cursor/selection positions
+(ported from Helix):
+
+```
+#[|cursor]#    — cursor at this position (pipe = cursor head)
+#[selected|]#  — selection with head after anchor
+```
+
+Helper functions in `ms-core::test`:
+- `print(annotated) -> (String, usize, usize)` — parse annotations,
+  return plain text + cursor line + cursor col.
+- `plain(text, line, col) -> String` — inverse: insert annotations
+  into plain text for readable assertion failures.
+
+### Integration test pattern
+
+```rust
+#[test]
+fn word_motion() {
+    // (initial_state, keystrokes, expected_state)
+    test(("#[|h]#ello world", "w", "#[|w]#orld"));
+}
+```
+
+### Cargo alias
+
+```
+cargo integration-test  →  cargo test --features integration -p ms-term --test integration
+```
+
+### CI matrix
+
+- `cargo test --workspace` — unit tests (Linux + macOS)
+- `cargo integration-test` — integration tests (Linux + macOS)
 
 ---
 

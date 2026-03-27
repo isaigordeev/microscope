@@ -15,7 +15,7 @@ use ms_view::mode::Mode;
 
 const GUTTER_WIDTH: u16 = 6;
 
-pub(crate) struct Application {
+pub struct Application {
     editor: Editor,
     terminal: Terminal,
 }
@@ -23,7 +23,7 @@ pub(crate) struct Application {
 impl Application {
     /// # Errors
     /// Returns IO error if terminal cannot be created.
-    pub(crate) fn new(editor: Editor) -> io::Result<Self> {
+    pub fn new(editor: Editor) -> io::Result<Self> {
         let terminal = Terminal::stdout()?;
         Ok(Self { editor, terminal })
     }
@@ -31,7 +31,7 @@ impl Application {
     /// Create an event stream from the terminal
     /// backend. Wraps crossterm's `EventStream`.
     #[allow(clippy::unused_self)]
-    pub(crate) fn event_stream(&self) -> EventStream {
+    pub fn event_stream(&self) -> EventStream {
         EventStream::new()
     }
 
@@ -41,7 +41,7 @@ impl Application {
     /// # Errors
     /// Returns IO error on terminal or rendering
     /// failure.
-    pub(crate) async fn run<S>(
+    pub async fn run<S>(
         &mut self,
         input_stream: &mut S,
     ) -> io::Result<()>
@@ -259,7 +259,7 @@ fn build_status_line(
 
 // ----- Key dispatch -----
 
-fn handle_key(editor: &mut Editor, key: KeyEvent) {
+pub fn handle_key(editor: &mut Editor, key: KeyEvent) {
     match editor.mode {
         Mode::Normal => handle_normal(editor, key),
         Mode::Insert => handle_insert(editor, key),

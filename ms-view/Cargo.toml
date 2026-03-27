@@ -8,5 +8,8 @@ ms-core.workspace = true
 ms-event.workspace = true
 ropey.workspace = true
 
+[dev-dependencies]
+indoc = "2"
+
 [lints]
 workspace = true

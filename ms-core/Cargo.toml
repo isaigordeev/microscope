@@ -6,5 +6,8 @@ edition.workspace = true
 [dependencies]
 ropey.workspace = true
 
+[dev-dependencies]
+indoc = "2"
+
 [lints]
 workspace = true

@@ -4,7 +4,7 @@ use std::process;
 use ms_view::document::Document;
 use ms_view::editor::Editor;
 
-mod application;
+use ms_term::application;
 
 fn main() {
     let exit_code = main_impl();

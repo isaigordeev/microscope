@@ -125,3 +125,84 @@ impl Document {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ms_core::transaction::Transaction;
+
+    fn doc(text: &str) -> Document {
+        Document {
+            text: Rope::from(text),
+            path: None,
+            modified: false,
+        }
+    }
+
+    #[test]
+    fn scratch_is_empty() {
+        let d = Document::scratch();
+        assert_eq!(d.text.len_chars(), 0);
+        assert!(!d.modified);
+        assert!(d.path.is_none());
+    }
+
+    #[test]
+    fn line_count() {
+        let d = doc("hello\nworld\n");
+        assert_eq!(d.line_count(), 3);
+    }
+
+    #[test]
+    fn line_len_excludes_newline() {
+        let d = doc("hello\nhi\n");
+        assert_eq!(d.line_len(0), 5);
+        assert_eq!(d.line_len(1), 2);
+    }
+
+    #[test]
+    fn line_col_to_char_and_back() {
+        let d = doc("hello\nworld\nfoo");
+        // 'w' is at line 1, col 0 → char 6
+        assert_eq!(d.line_col_to_char(1, 0), 6);
+        assert_eq!(d.char_to_line_col(6), (1, 0));
+        // 'o' in "foo" is at line 2, col 1 → char 13
+        assert_eq!(d.line_col_to_char(2, 1), 13);
+        assert_eq!(d.char_to_line_col(13), (2, 1));
+    }
+
+    #[test]
+    fn line_col_clamps_past_end() {
+        let d = doc("hi");
+        // col 100 on line 0 should clamp to len
+        assert_eq!(d.line_col_to_char(0, 100), 2);
+        // line past end should return len_chars
+        assert_eq!(
+            d.line_col_to_char(99, 0),
+            d.text.len_chars(),
+        );
+    }
+
+    #[test]
+    fn apply_transaction_marks_modified() {
+        let mut d = doc("hello");
+        assert!(!d.modified);
+        let txn = Transaction::insert(5, " world");
+        d.apply_transaction(&txn).ok();
+        assert!(d.modified);
+        assert_eq!(d.text.to_string(), "hello world");
+    }
+
+    #[test]
+    fn line_out_of_range_returns_none() {
+        let d = doc("hello");
+        assert!(d.line(0).is_some());
+        assert!(d.line(99).is_none());
+    }
+
+    #[test]
+    fn line_len_out_of_range_returns_zero() {
+        let d = doc("hello");
+        assert_eq!(d.line_len(99), 0);
+    }
+}

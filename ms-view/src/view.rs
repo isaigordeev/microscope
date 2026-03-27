@@ -134,3 +134,138 @@ impl View {
         (self.cursor_line - self.scroll_offset) as u16
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn view(height: u16) -> View {
+        View::new(height)
+    }
+
+    #[test]
+    fn initial_state() {
+        let v = view(24);
+        assert_eq!(v.cursor_line, 0);
+        assert_eq!(v.cursor_col, 0);
+        assert_eq!(v.scroll_offset, 0);
+    }
+
+    #[test]
+    fn move_right_clamps() {
+        let mut v = view(24);
+        v.move_right(5);
+        assert_eq!(v.cursor_col, 1);
+        v.move_right(5);
+        v.move_right(5);
+        v.move_right(5);
+        v.move_right(5);
+        assert_eq!(v.cursor_col, 5);
+        // Can't go past max
+        v.move_right(5);
+        assert_eq!(v.cursor_col, 5);
+    }
+
+    #[test]
+    fn move_left_clamps_at_zero() {
+        let mut v = view(24);
+        v.move_left();
+        assert_eq!(v.cursor_col, 0);
+    }
+
+    #[test]
+    fn move_down_clamps() {
+        let mut v = view(24);
+        v.move_down(2, |_| 10);
+        assert_eq!(v.cursor_line, 1);
+        v.move_down(2, |_| 10);
+        assert_eq!(v.cursor_line, 2);
+        // Can't go past max_line
+        v.move_down(2, |_| 10);
+        assert_eq!(v.cursor_line, 2);
+    }
+
+    #[test]
+    fn move_up_clamps_at_zero() {
+        let mut v = view(24);
+        v.move_up(|_| 10);
+        assert_eq!(v.cursor_line, 0);
+    }
+
+    #[test]
+    fn desired_col_stickiness() {
+        let mut v = view(24);
+        // Move to col 8
+        for _ in 0..8 {
+            v.move_right(10);
+        }
+        assert_eq!(v.cursor_col, 8);
+        assert_eq!(v.desired_col, 8);
+
+        // Move down to a short line (len 3), then back up
+        v.move_down(5, |line| {
+            if line == 1 { 3 } else { 10 }
+        });
+        assert_eq!(v.cursor_col, 3); // clamped
+        assert_eq!(v.desired_col, 8); // sticky
+
+        v.move_down(5, |line| {
+            if line == 1 { 3 } else { 10 }
+        });
+        assert_eq!(v.cursor_col, 8); // restored
+    }
+
+    #[test]
+    fn scroll_offset_adjusts_down() {
+        let mut v = view(10); // 10 visible rows
+        // scrolloff = 4, so scrolling starts at line 6
+        for i in 0..20 {
+            v.move_down(30, |_| 10);
+            if i >= 5 {
+                assert!(v.scroll_offset > 0);
+            }
+        }
+        assert!(v.scroll_offset > 0);
+    }
+
+    #[test]
+    fn scroll_offset_adjusts_up() {
+        let mut v = view(10);
+        // Move down far, then back up
+        for _ in 0..20 {
+            v.move_down(30, |_| 10);
+        }
+        let prev_offset = v.scroll_offset;
+        for _ in 0..20 {
+            v.move_up(|_| 10);
+        }
+        assert!(v.scroll_offset < prev_offset);
+        assert_eq!(v.cursor_line, 0);
+        assert_eq!(v.scroll_offset, 0);
+    }
+
+    #[test]
+    fn line_start_end() {
+        let mut v = view(24);
+        for _ in 0..5 {
+            v.move_right(10);
+        }
+        v.move_to_line_end(10);
+        assert_eq!(v.cursor_col, 9);
+
+        v.move_to_line_start();
+        assert_eq!(v.cursor_col, 0);
+    }
+
+    #[test]
+    fn cursor_screen_row_tracks_scroll() {
+        let mut v = view(10);
+        for _ in 0..15 {
+            v.move_down(30, |_| 10);
+        }
+        assert_eq!(
+            v.cursor_screen_row(),
+            (v.cursor_line - v.scroll_offset) as u16,
+        );
+    }
+}

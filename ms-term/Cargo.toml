@@ -3,6 +3,10 @@ name = "ms-term"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+name = "ms_term"
+path = "src/lib.rs"
+
 [[bin]]
 name = "microscope"
 path = "src/main.rs"
@@ -16,6 +20,15 @@ ropey.workspace = true
 tokio.workspace = true
 futures-core.workspace = true
 tokio-stream.workspace = true
+
+[features]
+default = []
+integration = []
+
+[dev-dependencies]
+indoc = "2"
+tempfile = "3"
+ms-core = { workspace = true }
 
 [lints]
 workspace = true
