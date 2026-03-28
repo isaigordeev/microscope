@@ -4,6 +4,7 @@ use crate::command::VimMachine;
 use crate::document::Document;
 use crate::mode::Mode;
 use crate::register::Registers;
+use crate::theme::Theme;
 use crate::view::View;
 
 /// Global editor state.
@@ -25,6 +26,8 @@ pub struct Editor {
     pub history: History,
     /// Active yank register (default `"`).
     pub yank_register: char,
+    /// Active color theme.
+    pub theme: Theme,
 }
 
 impl Editor {
@@ -40,6 +43,7 @@ impl Editor {
             registers: Registers::new(),
             history: History::new(),
             yank_register: '"',
+            theme: Theme::default(),
         }
     }
 

@@ -263,6 +263,7 @@ dependencies = [
  "indoc",
  "ms-core",
  "ms-event",
+ "ms-tui",
  "ropey",
 ]
 

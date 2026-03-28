@@ -1,7 +1,7 @@
 M1 — Vim Modal Editing
 =======================
 Status: IN PROGRESS
-Next up: M1b
+Next up: M1c
 
 Architecture: Enum state machine (VimMachine) in ms-view.
 Each keypress → feed(key) → Option<Action>. No callbacks.
@@ -26,7 +26,7 @@ M1a — Mode System + Basic Motions + Insert Mode + :w/:q   [DONE]
 
 ---
 
-M1b — Operators + Vim Grammar State Machine               [TODO]
+M1b — Operators + Vim Grammar State Machine               [DONE]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 New: ms-view/src/command.rs — VimMachine, VimState, Action,
      Operator, Motion enums

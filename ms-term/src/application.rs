@@ -7,7 +7,7 @@ use futures_core::Stream;
 
 use ms_core::movement;
 use ms_core::transaction::Transaction;
-use ms_tui::style::{Color, Style};
+use ms_tui::style::Style;
 use ms_tui::terminal::Terminal;
 use ms_view::command::{
     Action, InsertVariant, KeyCode as VKeyCode, KeyInput, Motion, MotionType,
@@ -97,13 +97,11 @@ impl Application {
         let area = self.terminal.area();
         self.terminal.buffer.clear();
 
-        let line_num_style = Style::default().fg(Color::Rgb(0x6B, 0x6B, 0x6B));
-        let text_style = Style::default().fg(Color::Rgb(0xD4, 0xD4, 0xD4));
-        let cursor_ln_style =
-            Style::default().fg(Color::Rgb(0xD4, 0xD4, 0xD4));
-        let status_style = Style::default()
-            .fg(Color::Rgb(0x00, 0x00, 0x00))
-            .bg(Color::Rgb(0xD4, 0xD4, 0xD4));
+        let theme = &self.editor.theme;
+        let line_num_style = theme.resolve("ui.linenr");
+        let text_style = theme.resolve("ui.text");
+        let cursor_ln_style = theme.resolve("ui.linenr.selected");
+        let status_style = theme.resolve("ui.statusline");
 
         let text_height = area.height.saturating_sub(1);
 
