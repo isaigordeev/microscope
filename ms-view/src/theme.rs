@@ -44,7 +44,7 @@ impl Theme {
 
     /// The default fallback theme (VS Code dark).
     pub fn fallback() -> Self {
-        vs_dark()
+        vs_light()
     }
 }
 
