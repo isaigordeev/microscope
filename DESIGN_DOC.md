@@ -29,7 +29,7 @@ workflow.
   Full modal editing: Normal, Insert, Visual, Visual-Line, Visual-Block,
   Operator-Pending.
 - **Built-in everything**: No plugin system. All features compiled in.
-- **Performance**: Rope buffer, async I/O (tokio), incremental tree-sitter,
+- **Performance**: Rope buffer, async I/O (tokio), incremental tree-sitter,w
   dirty-flag rendering.
 
 ---

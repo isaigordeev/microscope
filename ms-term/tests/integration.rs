@@ -334,3 +334,56 @@ fn command_force_quit() {
     }
     assert!(editor.should_quit);
 }
+
+// ── Theme command ────────────────────────────────
+
+#[test]
+fn theme_switch_to_light() {
+    let mut editor = test_editor("#[|]#hello");
+    let keys = parse_keys(":theme light<ret>");
+    for key in keys {
+        ms_term::application::handle_key(&mut editor, key);
+    }
+    assert_eq!(editor.theme.name, "vs_light");
+}
+
+#[test]
+fn theme_switch_to_dark() {
+    let mut editor = test_editor("#[|]#hello");
+    // Switch to light first, then back to dark
+    for key in parse_keys(":theme light<ret>") {
+        ms_term::application::handle_key(&mut editor, key);
+    }
+    assert_eq!(editor.theme.name, "vs_light");
+    for key in parse_keys(":theme dark<ret>") {
+        ms_term::application::handle_key(&mut editor, key);
+    }
+    assert_eq!(editor.theme.name, "vs_dark");
+}
+
+#[test]
+fn theme_unknown_shows_error() {
+    let mut editor = test_editor("#[|]#hello");
+    let keys = parse_keys(":theme nonexistent<ret>");
+    for key in keys {
+        ms_term::application::handle_key(&mut editor, key);
+    }
+    assert_eq!(
+        editor.status_message.as_deref(),
+        Some("Unknown theme: nonexistent"),
+    );
+}
+
+#[test]
+fn theme_no_arg_shows_current() {
+    let mut editor = test_editor("#[|]#hello");
+    let keys = parse_keys(":theme<ret>");
+    for key in keys {
+        ms_term::application::handle_key(&mut editor, key);
+    }
+    assert!(editor
+        .status_message
+        .as_ref()
+        .unwrap()
+        .starts_with("Current theme:"));
+}
