@@ -1,5 +1,9 @@
+use ms_core::history::History;
+
+use crate::command::VimMachine;
 use crate::document::Document;
 use crate::mode::Mode;
+use crate::register::Registers;
 use crate::view::View;
 
 /// Global editor state.
@@ -13,10 +17,18 @@ pub struct Editor {
     pub command_buffer: String,
     /// Status message (shown at bottom, clears on next key).
     pub status_message: Option<String>,
+    /// Vim grammar state machine.
+    pub vim: VimMachine,
+    /// Named registers for yank/paste.
+    pub registers: Registers,
+    /// Undo/redo history.
+    pub history: History,
+    /// Active yank register (default `"`).
+    pub yank_register: char,
 }
 
 impl Editor {
-    pub const fn new(document: Document, height: u16) -> Self {
+    pub fn new(document: Document, height: u16) -> Self {
         Self {
             document,
             view: View::new(height),
@@ -24,6 +36,10 @@ impl Editor {
             should_quit: false,
             command_buffer: String::new(),
             status_message: None,
+            vim: VimMachine::new(),
+            registers: Registers::new(),
+            history: History::new(),
+            yank_register: '"',
         }
     }
 
@@ -34,13 +50,11 @@ impl Editor {
 
     /// Length of the line at cursor (excluding newline).
     pub fn current_line_len(&self) -> usize {
-        self.document
-            .line(self.view.cursor_line)
-            .map_or(0, |l| {
-                let s: String = l.chars().collect();
-                let trimmed = s.trim_end_matches('\n');
-                trimmed.chars().count()
-            })
+        self.document.line(self.view.cursor_line).map_or(0, |l| {
+            let s: String = l.chars().collect();
+            let trimmed = s.trim_end_matches('\n');
+            trimmed.chars().count()
+        })
     }
 
     /// Clamp cursor column to valid range for current
@@ -89,8 +103,7 @@ impl Editor {
     /// Enter insert at first non-blank (vim `I`).
     pub fn enter_insert_bol(&mut self) {
         self.mode = Mode::Insert;
-        self.view.cursor_col =
-            self.first_non_blank_col(self.view.cursor_line);
+        self.view.cursor_col = self.first_non_blank_col(self.view.cursor_line);
     }
 
     /// Return to normal mode.
@@ -106,19 +119,10 @@ impl Editor {
     }
 
     /// First non-blank column on a line.
-    pub fn first_non_blank_col(
-        &self,
-        line: usize,
-    ) -> usize {
-        self.document
-            .line(line)
-            .map_or(0, |l| {
-                l.chars()
-                    .take_while(|c| {
-                        c.is_whitespace() && *c != '\n'
-                    })
-                    .count()
-            })
+    pub fn first_non_blank_col(&self, line: usize) -> usize {
+        self.document.line(line).map_or(0, |l| {
+            l.chars().take_while(|c| c.is_whitespace() && *c != '\n').count()
+        })
     }
 }
 
@@ -129,11 +133,8 @@ mod tests {
     use ropey::Rope;
 
     fn editor(text: &str) -> Editor {
-        let doc = Document {
-            text: Rope::from(text),
-            path: None,
-            modified: false,
-        };
+        let doc =
+            Document { text: Rope::from(text), path: None, modified: false };
         Editor::new(doc, 24)
     }
 

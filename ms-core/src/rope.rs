@@ -9,9 +9,7 @@ use std::path::Path;
 /// Returns `io::Error` if the file exists but cannot be read.
 pub fn from_file(path: &Path) -> std::io::Result<Rope> {
     if path.exists() {
-        Rope::from_reader(std::io::BufReader::new(
-            std::fs::File::open(path)?,
-        ))
+        Rope::from_reader(std::io::BufReader::new(std::fs::File::open(path)?))
     } else {
         Ok(Rope::new())
     }

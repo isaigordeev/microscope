@@ -22,8 +22,7 @@ pub struct Modifier {
 }
 
 /// Complete style: foreground, background, and modifiers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Style {
     pub fg: Option<Color>,
     pub bg: Option<Color>,
@@ -31,7 +30,6 @@ pub struct Style {
     /// Underline/undercurl color (for diagnostics).
     pub underline_color: Option<Color>,
 }
-
 
 impl Style {
     #[must_use]
@@ -55,19 +53,14 @@ impl Style {
             bg: other.bg.or(self.bg),
             modifier: Modifier {
                 bold: other.modifier.bold || self.modifier.bold,
-                italic: other.modifier.italic
-                    || self.modifier.italic,
-                underline: other.modifier.underline
-                    || self.modifier.underline,
-                undercurl: other.modifier.undercurl
-                    || self.modifier.undercurl,
+                italic: other.modifier.italic || self.modifier.italic,
+                underline: other.modifier.underline || self.modifier.underline,
+                undercurl: other.modifier.undercurl || self.modifier.undercurl,
                 strikethrough: other.modifier.strikethrough
                     || self.modifier.strikethrough,
                 dim: other.modifier.dim || self.modifier.dim,
             },
-            underline_color: other
-                .underline_color
-                .or(self.underline_color),
+            underline_color: other.underline_color.or(self.underline_color),
         }
     }
 }

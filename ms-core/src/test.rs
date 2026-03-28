@@ -8,8 +8,7 @@
 ///
 /// `print` parses annotations → plain text + cursor pos.
 /// `plain` inserts annotations back → readable assertions.
-
-/// Marker tokens.
+// Marker tokens.
 const HEAD_START: &str = "#[";
 const HEAD_END: &str = "]#";
 const PIPE: char = '|';
@@ -20,21 +19,14 @@ const PIPE: char = '|';
 /// # Panics
 /// Panics if the annotation is malformed or missing.
 #[must_use]
+#[allow(clippy::expect_used)]
 pub fn print(s: &str) -> (String, usize, usize) {
-    let start = s
-        .find(HEAD_START)
-        .expect("test string missing #[ marker");
-    let end = s
-        .find(HEAD_END)
-        .expect("test string missing ]# marker");
+    let start = s.find(HEAD_START).expect("test string missing #[ marker");
+    let end = s.find(HEAD_END).expect("test string missing ]# marker");
 
     // Content between markers should be just `|`
-    let inner =
-        &s[start + HEAD_START.len()..end];
-    assert!(
-        inner == "|",
-        "expected `|` between #[ and ]#, got `{inner}`",
-    );
+    let inner = &s[start + HEAD_START.len()..end];
+    assert!(inner == "|", "expected `|` between #[ and ]#, got `{inner}`",);
 
     // Build plain text: everything before #[, then
     // everything after ]#
@@ -66,11 +58,7 @@ pub fn print(s: &str) -> (String, usize, usize) {
 /// Insert cursor annotation into plain text at the given
 /// (line, col) position.
 #[must_use]
-pub fn plain(
-    text: &str,
-    line: usize,
-    col: usize,
-) -> String {
+pub fn plain(text: &str, line: usize, col: usize) -> String {
     let mut current_line = 0;
     let mut current_col = 0;
     let mut result = String::with_capacity(
@@ -79,10 +67,7 @@ pub fn plain(
 
     let mut inserted = false;
     for c in text.chars() {
-        if !inserted
-            && current_line == line
-            && current_col == col
-        {
+        if !inserted && current_line == line && current_col == col {
             result.push_str(HEAD_START);
             result.push(PIPE);
             result.push_str(HEAD_END);
@@ -137,8 +122,7 @@ mod tests {
 
     #[test]
     fn parse_multiline() {
-        let (text, line, col) =
-            print("hello\nwo#[|]#rld");
+        let (text, line, col) = print("hello\nwo#[|]#rld");
         assert_eq!(text, "hello\nworld");
         assert_eq!(line, 1);
         assert_eq!(col, 2);

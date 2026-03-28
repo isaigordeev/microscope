@@ -19,10 +19,7 @@ impl Terminal<Stdout> {
         let backend = Backend::new(io::stdout());
         let (w, h) = backend.size()?;
         let area = Rect::new(0, 0, w, h);
-        Ok(Self {
-            backend,
-            buffer: Buffer::new(area),
-        })
+        Ok(Self { backend, buffer: Buffer::new(area) })
     }
 }
 
@@ -77,11 +74,7 @@ impl<W: Write> Terminal<W> {
     ///
     /// # Errors
     /// Returns IO error if cursor positioning fails.
-    pub fn set_cursor(
-        &mut self,
-        x: u16,
-        y: u16,
-    ) -> io::Result<()> {
+    pub fn set_cursor(&mut self, x: u16, y: u16) -> io::Result<()> {
         self.backend.set_cursor(x, y)
     }
 

@@ -1,6 +1,4 @@
-use crossterm::event::{
-    KeyCode, KeyEvent, KeyModifiers,
-};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ms_core::test as test_util;
 use ms_view::document::Document;
 use ms_view::editor::Editor;
@@ -25,11 +23,7 @@ pub(crate) fn test_editor(annotated: &str) -> Editor {
 /// Get annotated text from current editor state.
 pub(crate) fn editor_annotated(editor: &Editor) -> String {
     let text = editor.document.text.to_string();
-    test_util::plain(
-        &text,
-        editor.view.cursor_line,
-        editor.view.cursor_col,
-    )
+    test_util::plain(&text, editor.view.cursor_line, editor.view.cursor_col)
 }
 
 /// Parse a key string into a sequence of `KeyEvent`s.
@@ -47,12 +41,8 @@ pub(crate) fn parse_keys(input: &str) -> Vec<KeyEvent> {
     while i < chars.len() {
         if chars[i] == '<' {
             // Find closing >
-            if let Some(end) = chars[i..]
-                .iter()
-                .position(|&c| c == '>')
-            {
-                let tag: String =
-                    chars[i + 1..i + end].iter().collect();
+            if let Some(end) = chars[i..].iter().position(|&c| c == '>') {
+                let tag: String = chars[i + 1..i + end].iter().collect();
                 keys.push(parse_special_key(&tag));
                 i += end + 1;
             } else {
@@ -77,49 +67,23 @@ pub(crate) fn parse_keys(input: &str) -> Vec<KeyEvent> {
 fn parse_special_key(tag: &str) -> KeyEvent {
     let lower = tag.to_lowercase();
     match lower.as_str() {
-        "esc" => KeyEvent::new(
-            KeyCode::Esc,
-            KeyModifiers::NONE,
-        ),
-        "ret" | "cr" | "enter" => KeyEvent::new(
-            KeyCode::Enter,
-            KeyModifiers::NONE,
-        ),
-        "bs" | "backspace" => KeyEvent::new(
-            KeyCode::Backspace,
-            KeyModifiers::NONE,
-        ),
-        "del" | "delete" => KeyEvent::new(
-            KeyCode::Delete,
-            KeyModifiers::NONE,
-        ),
-        "left" => KeyEvent::new(
-            KeyCode::Left,
-            KeyModifiers::NONE,
-        ),
-        "right" => KeyEvent::new(
-            KeyCode::Right,
-            KeyModifiers::NONE,
-        ),
-        "up" => KeyEvent::new(
-            KeyCode::Up,
-            KeyModifiers::NONE,
-        ),
-        "down" => KeyEvent::new(
-            KeyCode::Down,
-            KeyModifiers::NONE,
-        ),
+        "esc" => KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        "ret" | "cr" | "enter" => {
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+        }
+        "bs" | "backspace" => {
+            KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)
+        }
+        "del" | "delete" => KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE),
+        "left" => KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+        "right" => KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
+        "up" => KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+        "down" => KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
         s if s.starts_with("c-") => {
             let ch = s[2..].chars().next().unwrap_or('?');
-            KeyEvent::new(
-                KeyCode::Char(ch),
-                KeyModifiers::CONTROL,
-            )
+            KeyEvent::new(KeyCode::Char(ch), KeyModifiers::CONTROL)
         }
-        _ => KeyEvent::new(
-            KeyCode::Char('?'),
-            KeyModifiers::NONE,
-        ),
+        _ => KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
     }
 }
 
@@ -147,9 +111,7 @@ mod tests {
         let keys = parse_keys("<C-w>");
         assert_eq!(keys.len(), 1);
         assert_eq!(keys[0].code, KeyCode::Char('w'));
-        assert!(
-            keys[0].modifiers.contains(KeyModifiers::CONTROL)
-        );
+        assert!(keys[0].modifiers.contains(KeyModifiers::CONTROL));
     }
 
     #[test]

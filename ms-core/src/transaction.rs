@@ -23,18 +23,11 @@ pub struct Transaction {
 
 impl Transaction {
     pub const fn new(ops: Vec<Operation>) -> Self {
-        Self {
-            ops,
-            cursor_after: None,
-        }
+        Self { ops, cursor_after: None }
     }
 
     #[must_use]
-    pub const fn with_cursor(
-        mut self,
-        line: usize,
-        col: usize,
-    ) -> Self {
+    pub const fn with_cursor(mut self, line: usize, col: usize) -> Self {
         self.cursor_after = Some((line, col));
         self
     }
@@ -62,11 +55,7 @@ impl Transaction {
     }
 
     /// Replace `len` characters at `pos` with `text`.
-    pub fn replace(
-        pos: usize,
-        len: usize,
-        text: &str,
-    ) -> Self {
+    pub fn replace(pos: usize, len: usize, text: &str) -> Self {
         let mut ops = Vec::new();
         if pos > 0 {
             ops.push(Operation::Retain(pos));
@@ -84,34 +73,27 @@ impl Transaction {
     ///
     /// # Errors
     /// Returns an error if offsets exceed rope length.
-    pub fn apply(
-        &self,
-        rope: &mut Rope,
-    ) -> Result<(), TransactionError> {
+    pub fn apply(&self, rope: &mut Rope) -> Result<(), TransactionError> {
         let mut pos: usize = 0;
         for op in &self.ops {
             match op {
                 Operation::Retain(n) => {
                     let new_pos = pos + n;
                     if new_pos > rope.len_chars() {
-                        return Err(
-                            TransactionError::OutOfBounds {
-                                offset: new_pos,
-                                len: rope.len_chars(),
-                            },
-                        );
+                        return Err(TransactionError::OutOfBounds {
+                            offset: new_pos,
+                            len: rope.len_chars(),
+                        });
                     }
                     pos = new_pos;
                 }
                 Operation::Delete(n) => {
                     let end = pos + n;
                     if end > rope.len_chars() {
-                        return Err(
-                            TransactionError::OutOfBounds {
-                                offset: end,
-                                len: rope.len_chars(),
-                            },
-                        );
+                        return Err(TransactionError::OutOfBounds {
+                            offset: end,
+                            len: rope.len_chars(),
+                        });
                     }
                     rope.remove(pos..end);
                     // pos stays the same after delete
@@ -142,22 +124,16 @@ impl Transaction {
                 Operation::Delete(n) => {
                     // To invert a delete, we insert the
                     // deleted text back.
-                    let end = (pos + n)
-                        .min(rope.len_chars());
-                    let deleted: String = rope
-                        .slice(pos..end)
-                        .chars()
-                        .collect();
-                    inv_ops
-                        .push(Operation::Insert(deleted));
+                    let end = (pos + n).min(rope.len_chars());
+                    let deleted: String =
+                        rope.slice(pos..end).chars().collect();
+                    inv_ops.push(Operation::Insert(deleted));
                     pos += n;
                 }
                 Operation::Insert(text) => {
                     // To invert an insert, we delete the
                     // inserted length.
-                    inv_ops.push(Operation::Delete(
-                        text.chars().count(),
-                    ));
+                    inv_ops.push(Operation::Delete(text.chars().count()));
                     // pos does NOT advance in the
                     // original rope for inserts
                 }
@@ -175,10 +151,7 @@ pub enum TransactionError {
 }
 
 impl std::fmt::Display for TransactionError {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::OutOfBounds { offset, len } => {
                 write!(

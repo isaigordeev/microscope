@@ -18,24 +18,14 @@ impl Document {
     ///
     /// # Errors
     /// Returns IO error if file cannot be read.
-    pub fn open(
-        path: &std::path::Path,
-    ) -> std::io::Result<Self> {
+    pub fn open(path: &std::path::Path) -> std::io::Result<Self> {
         let text = rope::from_file(path)?;
-        Ok(Self {
-            text,
-            path: Some(path.to_path_buf()),
-            modified: false,
-        })
+        Ok(Self { text, path: Some(path.to_path_buf()), modified: false })
     }
 
     /// Create an empty scratch document.
     pub fn scratch() -> Self {
-        Self {
-            text: Rope::new(),
-            path: None,
-            modified: false,
-        }
+        Self { text: Rope::new(), path: None, modified: false }
     }
 
     pub fn line_count(&self) -> usize {
@@ -44,10 +34,7 @@ impl Document {
 
     /// Get the text of a line (0-indexed). Returns None
     /// if out of range.
-    pub fn line(
-        &self,
-        idx: usize,
-    ) -> Option<ropey::RopeSlice<'_>> {
+    pub fn line(&self, idx: usize) -> Option<ropey::RopeSlice<'_>> {
         if idx < self.text.len_lines() {
             Some(self.text.line(idx))
         } else {
@@ -58,19 +45,14 @@ impl Document {
     /// Length of a line in chars (excluding trailing
     /// newline).
     pub fn line_len(&self, idx: usize) -> usize {
-        self.line(idx)
-            .map_or(0, |l| {
-                let s: String = l.chars().collect();
-                s.trim_end_matches('\n').chars().count()
-            })
+        self.line(idx).map_or(0, |l| {
+            let s: String = l.chars().collect();
+            s.trim_end_matches('\n').chars().count()
+        })
     }
 
     /// Character offset for (line, col).
-    pub fn line_col_to_char(
-        &self,
-        line: usize,
-        col: usize,
-    ) -> usize {
+    pub fn line_col_to_char(&self, line: usize, col: usize) -> usize {
         if line >= self.text.len_lines() {
             return self.text.len_chars();
         }
@@ -80,10 +62,7 @@ impl Document {
     }
 
     /// Convert a character offset to (line, col).
-    pub fn char_to_line_col(
-        &self,
-        char_idx: usize,
-    ) -> (usize, usize) {
+    pub fn char_to_line_col(&self, char_idx: usize) -> (usize, usize) {
         let char_idx = char_idx.min(self.text.len_chars());
         let line = self.text.char_to_line(char_idx);
         let line_start = self.text.line_to_char(line);
@@ -110,11 +89,10 @@ impl Document {
     /// Returns IO error if writing fails, or if there's
     /// no path set.
     pub fn save(&mut self) -> std::io::Result<()> {
-        let path = self.path.as_ref().ok_or_else(|| {
-            std::io::Error::other(
-                "no file path set",
-            )
-        })?;
+        let path = self
+            .path
+            .as_ref()
+            .ok_or_else(|| std::io::Error::other("no file path set"))?;
         let file = std::fs::File::create(path)?;
         let mut writer = std::io::BufWriter::new(file);
         for chunk in self.text.chunks() {
@@ -132,11 +110,7 @@ mod tests {
     use ms_core::transaction::Transaction;
 
     fn doc(text: &str) -> Document {
-        Document {
-            text: Rope::from(text),
-            path: None,
-            modified: false,
-        }
+        Document { text: Rope::from(text), path: None, modified: false }
     }
 
     #[test]
@@ -177,10 +151,7 @@ mod tests {
         // col 100 on line 0 should clamp to len
         assert_eq!(d.line_col_to_char(0, 100), 2);
         // line past end should return len_chars
-        assert_eq!(
-            d.line_col_to_char(99, 0),
-            d.text.len_chars(),
-        );
+        assert_eq!(d.line_col_to_char(99, 0), d.text.len_chars(),);
     }
 
     #[test]

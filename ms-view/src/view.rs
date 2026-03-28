@@ -37,19 +37,13 @@ impl View {
             return;
         }
 
-        if self.cursor_line
-            < self.scroll_offset + scrolloff
-        {
-            self.scroll_offset =
-                self.cursor_line.saturating_sub(scrolloff);
+        if self.cursor_line < self.scroll_offset + scrolloff {
+            self.scroll_offset = self.cursor_line.saturating_sub(scrolloff);
         }
 
-        if self.cursor_line + scrolloff
-            >= self.scroll_offset + h
-        {
+        if self.cursor_line + scrolloff >= self.scroll_offset + h {
             self.scroll_offset =
-                (self.cursor_line + scrolloff + 1)
-                    .saturating_sub(h);
+                (self.cursor_line + scrolloff + 1).saturating_sub(h);
         }
     }
 
@@ -62,24 +56,19 @@ impl View {
     ) {
         if self.cursor_line < max_line {
             self.cursor_line += 1;
-            self.cursor_col = self
-                .desired_col
-                .min(line_len_fn(self.cursor_line));
+            self.cursor_col =
+                self.desired_col.min(line_len_fn(self.cursor_line));
         }
         self.ensure_cursor_visible();
     }
 
     /// Move cursor up. Uses `desired_col` for column
     /// stickiness.
-    pub fn move_up(
-        &mut self,
-        line_len_fn: impl Fn(usize) -> usize,
-    ) {
+    pub fn move_up(&mut self, line_len_fn: impl Fn(usize) -> usize) {
         if self.cursor_line > 0 {
             self.cursor_line -= 1;
-            self.cursor_col = self
-                .desired_col
-                .min(line_len_fn(self.cursor_line));
+            self.cursor_col =
+                self.desired_col.min(line_len_fn(self.cursor_line));
         }
         self.ensure_cursor_visible();
     }
@@ -108,16 +97,12 @@ impl View {
 
     /// Move to end of line (vim `$`).
     pub const fn move_to_line_end(&mut self, line_len: usize) {
-        self.cursor_col =
-            if line_len == 0 { 0 } else { line_len - 1 };
+        self.cursor_col = if line_len == 0 { 0 } else { line_len - 1 };
         self.desired_col = usize::MAX;
     }
 
     /// Move to first non-blank (vim `^`).
-    pub const fn move_to_first_non_blank(
-        &mut self,
-        col: usize,
-    ) {
+    pub const fn move_to_first_non_blank(&mut self, col: usize) {
         self.cursor_col = col;
         self.desired_col = col;
     }
@@ -203,22 +188,18 @@ mod tests {
         assert_eq!(v.desired_col, 8);
 
         // Move down to a short line (len 3), then back up
-        v.move_down(5, |line| {
-            if line == 1 { 3 } else { 10 }
-        });
+        v.move_down(5, |line| if line == 1 { 3 } else { 10 });
         assert_eq!(v.cursor_col, 3); // clamped
         assert_eq!(v.desired_col, 8); // sticky
 
-        v.move_down(5, |line| {
-            if line == 1 { 3 } else { 10 }
-        });
+        v.move_down(5, |line| if line == 1 { 3 } else { 10 });
         assert_eq!(v.cursor_col, 8); // restored
     }
 
     #[test]
     fn scroll_offset_adjusts_down() {
         let mut v = view(10); // 10 visible rows
-        // scrolloff = 4, so scrolling starts at line 6
+                              // scrolloff = 4, so scrolling starts at line 6
         for i in 0..20 {
             v.move_down(30, |_| 10);
             if i >= 5 {

@@ -21,10 +21,7 @@ async fn main_impl() -> i32 {
         match Document::open(path) {
             Ok(doc) => doc,
             Err(e) => {
-                eprintln!(
-                    "Error opening {}: {e}",
-                    path.display()
-                );
+                eprintln!("Error opening {}: {e}", path.display());
                 return 1;
             }
         }
@@ -34,9 +31,7 @@ async fn main_impl() -> i32 {
 
     let editor = Editor::new(document, 24);
 
-    let mut app = match application::Application::new(
-        editor,
-    ) {
+    let mut app = match application::Application::new(editor) {
         Ok(app) => app,
         Err(e) => {
             eprintln!("Error: {e}");

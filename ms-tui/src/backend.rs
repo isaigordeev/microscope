@@ -2,12 +2,10 @@ use std::io::{self, Write};
 
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::style::{
-    Attribute, Print, SetAttribute, SetBackgroundColor,
-    SetForegroundColor,
+    Attribute, Print, SetAttribute, SetBackgroundColor, SetForegroundColor,
 };
 use crossterm::terminal::{
-    self, Clear, ClearType, EnterAlternateScreen,
-    LeaveAlternateScreen,
+    self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use crossterm::{execute, queue};
 
@@ -44,11 +42,7 @@ impl<W: Write> Backend<W> {
     /// # Errors
     /// Returns IO error if terminal teardown fails.
     pub fn teardown(&mut self) -> io::Result<()> {
-        execute!(
-            self.writer,
-            Show,
-            LeaveAlternateScreen
-        )?;
+        execute!(self.writer, Show, LeaveAlternateScreen)?;
         terminal::disable_raw_mode()
     }
 
@@ -86,10 +80,7 @@ impl<W: Write> Backend<W> {
         }
 
         // Reset attributes at the end
-        queue!(
-            self.writer,
-            SetAttribute(Attribute::Reset)
-        )?;
+        queue!(self.writer, SetAttribute(Attribute::Reset))?;
         self.writer.flush()
     }
 
@@ -97,80 +88,43 @@ impl<W: Write> Backend<W> {
     ///
     /// # Errors
     /// Returns IO error if cursor positioning fails.
-    pub fn set_cursor(
-        &mut self,
-        x: u16,
-        y: u16,
-    ) -> io::Result<()> {
+    pub fn set_cursor(&mut self, x: u16, y: u16) -> io::Result<()> {
         execute!(self.writer, MoveTo(x, y), Show)
     }
 
-    fn apply_style(
-        &mut self,
-        style: Style,
-    ) -> io::Result<()> {
+    fn apply_style(&mut self, style: Style) -> io::Result<()> {
         // Reset first to clear previous state
-        queue!(
-            self.writer,
-            SetAttribute(Attribute::Reset)
-        )?;
+        queue!(self.writer, SetAttribute(Attribute::Reset))?;
 
         if let Some(fg) = style.fg {
-            queue!(
-                self.writer,
-                SetForegroundColor(to_crossterm_color(fg))
-            )?;
+            queue!(self.writer, SetForegroundColor(to_crossterm_color(fg)))?;
         }
         if let Some(bg) = style.bg {
-            queue!(
-                self.writer,
-                SetBackgroundColor(to_crossterm_color(bg))
-            )?;
+            queue!(self.writer, SetBackgroundColor(to_crossterm_color(bg)))?;
         }
         if style.modifier.bold {
-            queue!(
-                self.writer,
-                SetAttribute(Attribute::Bold)
-            )?;
+            queue!(self.writer, SetAttribute(Attribute::Bold))?;
         }
         if style.modifier.italic {
-            queue!(
-                self.writer,
-                SetAttribute(Attribute::Italic)
-            )?;
+            queue!(self.writer, SetAttribute(Attribute::Italic))?;
         }
         if style.modifier.underline {
-            queue!(
-                self.writer,
-                SetAttribute(Attribute::Underlined)
-            )?;
+            queue!(self.writer, SetAttribute(Attribute::Underlined))?;
         }
         if style.modifier.dim {
-            queue!(
-                self.writer,
-                SetAttribute(Attribute::Dim)
-            )?;
+            queue!(self.writer, SetAttribute(Attribute::Dim))?;
         }
         if style.modifier.strikethrough {
-            queue!(
-                self.writer,
-                SetAttribute(Attribute::CrossedOut)
-            )?;
+            queue!(self.writer, SetAttribute(Attribute::CrossedOut))?;
         }
         Ok(())
     }
 }
 
-const fn to_crossterm_color(
-    color: Color,
-) -> crossterm::style::Color {
+const fn to_crossterm_color(color: Color) -> crossterm::style::Color {
     match color {
-        Color::Rgb(r, g, b) => {
-            crossterm::style::Color::Rgb { r, g, b }
-        }
-        Color::Indexed(i) => {
-            crossterm::style::Color::AnsiValue(i)
-        }
+        Color::Rgb(r, g, b) => crossterm::style::Color::Rgb { r, g, b },
+        Color::Indexed(i) => crossterm::style::Color::AnsiValue(i),
         Color::Reset => crossterm::style::Color::Reset,
     }
 }

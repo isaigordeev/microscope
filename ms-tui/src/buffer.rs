@@ -9,10 +9,7 @@ pub struct Cell {
 
 impl Default for Cell {
     fn default() -> Self {
-        Self {
-            symbol: " ".to_owned(),
-            style: Style::default(),
-        }
+        Self { symbol: " ".to_owned(), style: Style::default() }
     }
 }
 
@@ -26,18 +23,8 @@ pub struct Rect {
 }
 
 impl Rect {
-    pub const fn new(
-        x: u16,
-        y: u16,
-        width: u16,
-        height: u16,
-    ) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
+    pub const fn new(x: u16, y: u16, width: u16, height: u16) -> Self {
+        Self { x, y, width, height }
     }
 
     pub fn area(self) -> u32 {
@@ -56,17 +43,10 @@ pub struct Buffer {
 impl Buffer {
     pub fn new(area: Rect) -> Self {
         let size = area.area() as usize;
-        Self {
-            area,
-            cells: vec![Cell::default(); size],
-        }
+        Self { area, cells: vec![Cell::default(); size] }
     }
 
-    pub fn cell_mut(
-        &mut self,
-        x: u16,
-        y: u16,
-    ) -> Option<&mut Cell> {
+    pub fn cell_mut(&mut self, x: u16, y: u16) -> Option<&mut Cell> {
         if x < self.area.x
             || y < self.area.y
             || x >= self.area.x + self.area.width
@@ -74,21 +54,14 @@ impl Buffer {
         {
             return None;
         }
-        let idx = (y - self.area.y) as usize
-            * self.area.width as usize
+        let idx = (y - self.area.y) as usize * self.area.width as usize
             + (x - self.area.x) as usize;
         self.cells.get_mut(idx)
     }
 
     /// Write a string at (x, y) with the given style.
     /// Advances x for each character. Does not wrap.
-    pub fn put_str(
-        &mut self,
-        x: u16,
-        y: u16,
-        s: &str,
-        style: Style,
-    ) {
+    pub fn put_str(&mut self, x: u16, y: u16, s: &str, style: Style) {
         let mut col = x;
         for ch in s.chars() {
             if let Some(cell) = self.cell_mut(col, y) {
@@ -109,9 +82,7 @@ impl Buffer {
     }
 
     /// Iterate all cells with (x, y) positions.
-    pub fn iter(
-        &self,
-    ) -> impl Iterator<Item = (u16, u16, &Cell)> {
+    pub fn iter(&self) -> impl Iterator<Item = (u16, u16, &Cell)> {
         let w = self.area.width;
         let x0 = self.area.x;
         let y0 = self.area.y;
