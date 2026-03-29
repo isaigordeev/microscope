@@ -20,6 +20,8 @@ ropey.workspace = true
 tokio.workspace = true
 futures-core.workspace = true
 tokio-stream.workspace = true
+nucleo.workspace = true
+ignore.workspace = true
 
 [features]
 default = []

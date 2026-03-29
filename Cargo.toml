@@ -27,6 +27,8 @@ crossterm = { version = "0.28", features = ["event-stream"] }
 tokio = { version = "1", features = ["full"] }
 futures-core = "0.3"
 tokio-stream = "0.1"
+nucleo = "0.5"
+ignore = "0.4"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

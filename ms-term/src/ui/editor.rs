@@ -1,4 +1,6 @@
-use crossterm::event::Event;
+use std::path::PathBuf;
+
+use crossterm::event::{Event, KeyCode, KeyModifiers};
 
 use ms_tui::buffer::{Buffer, Rect};
 use ms_view::command::Action;
@@ -9,6 +11,7 @@ use crate::commands;
 use crate::compositor::{
     Callback, Component, Context, CursorKind, EventResult, Position,
 };
+use crate::ui::file_picker;
 use crate::ui::prompt::Prompt;
 
 const GUTTER_WIDTH: u16 = 6;
@@ -16,11 +19,15 @@ const GUTTER_WIDTH: u16 = 6;
 /// The base editor layer — always at the bottom of
 /// the compositor stack.
 #[derive(Debug, Default)]
-pub struct EditorView;
+pub struct EditorView {
+    /// True after Space is pressed, waiting for the
+    /// leader-key follow-up (e.g. `f` for file picker).
+    pending_space: bool,
+}
 
 impl EditorView {
     pub const fn new() -> Self {
-        Self
+        Self { pending_space: false }
     }
 }
 
@@ -35,30 +42,13 @@ impl Component for EditorView {
         };
 
         match ctx.editor.mode {
-            Mode::Normal => {
-                let input = commands::to_key_input(*key);
-                let action = ctx.editor.vim.feed(input);
-
-                // If entering command mode, push Prompt
-                if matches!(action, Action::EnterCommand) {
-                    ctx.editor.mode = Mode::Command;
-                    let cb: Callback = Box::new(|compositor, _ctx| {
-                        compositor.push(Box::new(Prompt::command()));
-                    });
-                    return EventResult::Consumed(Some(cb));
-                }
-
-                ctx.editor.status_message = None;
-                commands::execute_action(ctx.editor, action);
-                EventResult::Consumed(None)
-            }
+            Mode::Normal => self.handle_normal(key, ctx),
             Mode::Insert => {
                 commands::handle_insert(ctx.editor, *key);
                 EventResult::Consumed(None)
             }
             Mode::Command => {
-                // Shouldn't reach here — Prompt handles it.
-                // But keep for safety.
+                // Prompt handles this — safety fallback.
                 commands::handle_command(ctx.editor, *key);
                 EventResult::Consumed(None)
             }
@@ -116,5 +106,66 @@ impl Component for EditorView {
             Mode::Insert | Mode::Command => CursorKind::Bar,
         };
         (Some(Position { col, row }), kind)
+    }
+}
+
+impl EditorView {
+    /// Handle a keypress in Normal mode, including the
+    /// Space-leader prefix for file picker etc.
+    fn handle_normal(
+        &mut self,
+        key: &crossterm::event::KeyEvent,
+        ctx: &mut Context,
+    ) -> EventResult {
+        // ── Space-leader sequences ──
+        if self.pending_space {
+            self.pending_space = false;
+            if key.code == KeyCode::Char('p') {
+                return self.open_file_picker();
+            }
+            // Unknown leader combo — feed Space then
+            // this key to VimMachine.
+            let space =
+                commands::to_key_input(crossterm::event::KeyEvent::new(
+                    KeyCode::Char(' '),
+                    KeyModifiers::NONE,
+                ));
+            ctx.editor.vim.feed(space);
+        }
+
+        if key.code == KeyCode::Char(' ')
+            && key.modifiers == KeyModifiers::NONE
+        {
+            self.pending_space = true;
+            return EventResult::Consumed(None);
+        }
+
+        // ── Normal VimMachine dispatch ──
+        let input = commands::to_key_input(*key);
+        let action = ctx.editor.vim.feed(input);
+
+        if matches!(action, Action::EnterCommand) {
+            ctx.editor.mode = Mode::Command;
+            let cb: Callback = Box::new(|compositor, _ctx| {
+                compositor.push(Box::new(Prompt::command()));
+            });
+            return EventResult::Consumed(Some(cb));
+        }
+
+        ctx.editor.status_message = None;
+        commands::execute_action(ctx.editor, action);
+        EventResult::Consumed(None)
+    }
+
+    /// Push the file picker onto the compositor.
+    #[allow(clippy::unused_self)]
+    fn open_file_picker(&self) -> EventResult {
+        let cb: Callback = Box::new(|compositor, _ctx| {
+            let root =
+                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let picker = file_picker::file_picker(&root);
+            compositor.push(Box::new(picker));
+        });
+        EventResult::Consumed(Some(cb))
     }
 }
