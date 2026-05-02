@@ -28,27 +28,25 @@ type PreviewFn<T> = Box<dyn Fn(&T) -> Option<PathBuf>>;
 /// A generic fuzzy picker overlay.
 ///
 /// Pushes as a compositor layer. Type to filter, navigate
-/// with Up/Down, Enter to select, Esc to cancel.
+/// with Up/Down, Enter to select, Esc to cancel. Renders
+/// fzf-classic style: bottom-anchored list, prompt at the
+/// very bottom, count line just above.
 #[allow(missing_debug_implementations)]
 pub struct Picker<T: Send + Sync + 'static> {
-    /// Nucleo fuzzy matcher instance.
     matcher: Nucleo<T>,
-    /// User query string.
     query: String,
-    /// Previous query (for append optimization).
     prev_query: String,
     /// Selected item index (within matched results).
+    /// Cursor 0 is the best match — rendered at the bottom.
     cursor: u32,
-    /// Format an item for display.
     format_fn: FormatFn<T>,
-    /// Extract a preview file path from an item.
     preview_fn: Option<PreviewFn<T>>,
-    /// Callback when user selects an item.
     on_select: SelectFn<T>,
-    /// Cached file preview content.
     preview_cache: Option<(PathBuf, Vec<String>)>,
-    /// Whether preview panel is visible.
     show_preview: bool,
+    /// Static text shown before the query on the prompt line
+    /// (e.g. `~/microscope/`).
+    prompt_prefix: String,
 }
 
 impl<T: Send + Sync + 'static> Picker<T> {
@@ -81,6 +79,7 @@ impl<T: Send + Sync + 'static> Picker<T> {
             on_select,
             preview_cache: None,
             show_preview: true,
+            prompt_prefix: String::new(),
         }
     }
 
@@ -88,6 +87,13 @@ impl<T: Send + Sync + 'static> Picker<T> {
     #[must_use]
     pub fn with_preview(mut self, f: PreviewFn<T>) -> Self {
         self.preview_fn = Some(f);
+        self
+    }
+
+    /// Set a static prompt prefix shown before the query.
+    #[must_use]
+    pub fn with_prompt_prefix(mut self, prefix: String) -> Self {
+        self.prompt_prefix = prefix;
         self
     }
 
@@ -265,19 +271,20 @@ impl<T: Send + Sync + 'static> Component for Picker<T> {
     fn render(&mut self, area: Rect, surface: &mut Buffer, ctx: &mut Context) {
         let theme = &ctx.editor.theme;
         let popup_style = theme.resolve("ui.popup");
-        let selected_style = theme.resolve("ui.popup.selected");
+        let selected_style = theme
+            .get("ui.picker.selected")
+            .copied()
+            .unwrap_or_else(|| theme.resolve("ui.popup.selected"));
         let sep_style = theme.resolve("ui.separator");
         let text_style = theme.resolve("ui.text");
+        let count_style = theme.resolve("ui.picker.count");
+        let prompt_style = theme.resolve("ui.picker.prompt");
 
         let outer = picker_area(area);
 
-        // Fill background.
         fill_area(surface, outer, popup_style);
-
-        // Draw border.
         draw_border(surface, outer, sep_style);
 
-        // Inner area (inside border).
         let inner = Rect::new(
             outer.x + 1,
             outer.y + 1,
@@ -289,68 +296,73 @@ impl<T: Send + Sync + 'static> Component for Picker<T> {
             return;
         }
 
-        // Determine list/preview split.
         let show_preview = self.show_preview
             && self.preview_fn.is_some()
             && outer.width >= MIN_PREVIEW_WIDTH;
 
-        // Ensure preview is loaded before taking snapshot.
         if show_preview && self.preview_cache.is_none() {
             self.update_preview();
         }
 
-        // Tick matcher and get fresh results.
         self.matcher.tick(10);
         let snapshot = self.matcher.snapshot();
         let total = snapshot.matched_item_count();
 
-        // ── Prompt row ──
-        let prompt_text = format!("> {}", self.query);
-        surface.put_str(inner.x, inner.y, &prompt_text, popup_style);
-
-        let count_text = format!("{total}/{}", snapshot.item_count());
-        let count_x =
-            (inner.x + inner.width).saturating_sub(count_text.len() as u16);
-        surface.put_str(count_x, inner.y, &count_text, popup_style);
-
-        // ── Separator ──
-        let sep_y = inner.y + 1;
-        for x in inner.x..inner.x + inner.width {
-            set_symbol(surface, x, sep_y, "\u{2500}", sep_style);
-        }
-
-        // ── Content area ──
-        let content_y = sep_y + 1;
-        let content_h = inner.height.saturating_sub(2) as u32;
-
-        if content_h == 0 {
-            return;
-        }
-
         let list_width =
             if show_preview { inner.width / 2 } else { inner.width };
 
-        // Page-based scrolling (like Helix).
-        let offset = self.cursor - (self.cursor % content_h.max(1));
-        let end = offset.saturating_add(content_h).min(total);
+        // Bottom two rows are reserved for count + prompt; items
+        // fill what's left, growing upward from just above count.
+        let prompt_y = inner.y + inner.height - 1;
+        let count_y = prompt_y - 1;
+        let items_h = u32::from(inner.height.saturating_sub(2));
 
-        for (i, item) in snapshot.matched_items(offset..end).enumerate() {
-            let row = content_y + i as u16;
-            let is_selected = offset + i as u32 == self.cursor;
-            let style = if is_selected { selected_style } else { popup_style };
+        // ── Items (best match at bottom) ──
+        if items_h > 0 {
+            let page = self.cursor / items_h;
+            let offset = page * items_h;
+            let end = offset.saturating_add(items_h).min(total);
 
-            // Clear the row.
-            for x in inner.x..inner.x + list_width {
-                set_symbol(surface, x, row, " ", style);
+            for (i, item) in snapshot.matched_items(offset..end).enumerate() {
+                let row = count_y.saturating_sub(1 + i as u16);
+                let global = offset + i as u32;
+                let is_selected = global == self.cursor;
+                let style =
+                    if is_selected { selected_style } else { popup_style };
+
+                for x in inner.x..inner.x + list_width {
+                    set_symbol(surface, x, row, " ", style);
+                }
+
+                let display = (self.format_fn)(item.data);
+                let text = format!("  {display}");
+                let max_chars = list_width.saturating_sub(1) as usize;
+                let truncated: String = text.chars().take(max_chars).collect();
+                surface.put_str(inner.x, row, &truncated, style);
             }
-
-            let prefix = if is_selected { " > " } else { "   " };
-            let display = (self.format_fn)(item.data);
-            let text = format!("{prefix}{display}");
-            let max_chars = list_width.saturating_sub(1) as usize;
-            let truncated: String = text.chars().take(max_chars).collect();
-            surface.put_str(inner.x, row, &truncated, style);
         }
+
+        // ── Count line ──
+        for x in inner.x..inner.x + list_width {
+            set_symbol(surface, x, count_y, " ", popup_style);
+        }
+        let count_text =
+            format!("  {}/{} (0)", total, snapshot.item_count());
+        let max_count = list_width.saturating_sub(1) as usize;
+        let count_truncated: String =
+            count_text.chars().take(max_count).collect();
+        surface.put_str(inner.x, count_y, &count_truncated, count_style);
+
+        // ── Prompt line ──
+        for x in inner.x..inner.x + list_width {
+            set_symbol(surface, x, prompt_y, " ", popup_style);
+        }
+        let prompt_text =
+            format!("  {}{}", self.prompt_prefix, self.query);
+        let max_prompt = list_width.saturating_sub(1) as usize;
+        let prompt_truncated: String =
+            prompt_text.chars().take(max_prompt).collect();
+        surface.put_str(inner.x, prompt_y, &prompt_truncated, prompt_style);
 
         // ── Preview panel ──
         if show_preview {
@@ -358,16 +370,15 @@ impl<T: Send + Sync + 'static> Component for Picker<T> {
             let preview_x = sep_x + 1;
             let preview_w = inner.width.saturating_sub(list_width + 1);
 
-            // Vertical separator.
-            for row in content_y..content_y + content_h as u16 {
+            for row in inner.y..inner.y + inner.height {
                 set_symbol(surface, sep_x, row, "\u{2502}", sep_style);
             }
 
             if let Some((_, ref lines)) = self.preview_cache {
                 for (i, line) in
-                    lines.iter().take(content_h as usize).enumerate()
+                    lines.iter().take(inner.height as usize).enumerate()
                 {
-                    let row = content_y + i as u16;
+                    let row = inner.y + i as u16;
                     let truncated: String =
                         line.chars().take(preview_w as usize).collect();
                     surface.put_str(preview_x, row, &truncated, text_style);
@@ -382,8 +393,10 @@ impl<T: Send + Sync + 'static> Component for Picker<T> {
         _editor: &Editor,
     ) -> (Option<Position>, CursorKind) {
         let outer = picker_area(area);
-        let col = outer.x + 1 + 2 + self.query.len() as u16;
-        let row = outer.y + 1;
+        let prefix_chars = self.prompt_prefix.chars().count() as u16;
+        let query_chars = self.query.chars().count() as u16;
+        let col = outer.x + 1 + 2 + prefix_chars + query_chars;
+        let row = outer.y + outer.height.saturating_sub(2);
         (Some(Position { col, row }), CursorKind::Bar)
     }
 
@@ -419,10 +432,10 @@ fn draw_border(surface: &mut Buffer, area: Rect, style: ms_tui::style::Style) {
     let x2 = area.x + area.width.saturating_sub(1);
     let y2 = area.y + area.height.saturating_sub(1);
 
-    set_symbol(surface, x1, y1, "\u{250c}", style);
-    set_symbol(surface, x2, y1, "\u{2510}", style);
-    set_symbol(surface, x1, y2, "\u{2514}", style);
-    set_symbol(surface, x2, y2, "\u{2518}", style);
+    set_symbol(surface, x1, y1, "\u{256d}", style);
+    set_symbol(surface, x2, y1, "\u{256e}", style);
+    set_symbol(surface, x1, y2, "\u{2570}", style);
+    set_symbol(surface, x2, y2, "\u{256f}", style);
 
     for x in (x1 + 1)..x2 {
         set_symbol(surface, x, y1, "\u{2500}", style);

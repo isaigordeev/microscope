@@ -13,6 +13,7 @@ use super::picker::Picker;
 pub fn file_picker(root: &Path) -> Picker<PathBuf> {
     let files = collect_files(root);
     let root_owned = root.to_path_buf();
+    let prompt = prompt_prefix(root);
 
     Picker::new(
         Box::new(move |path: &PathBuf| {
@@ -27,6 +28,32 @@ pub fn file_picker(root: &Path) -> Picker<PathBuf> {
         files,
     )
     .with_preview(Box::new(|path: &PathBuf| Some(path.clone())))
+    .with_prompt_prefix(prompt)
+}
+
+/// Build the fzf-style prompt prefix from the workspace root,
+/// collapsing `$HOME` to `~` and ensuring a trailing slash.
+fn prompt_prefix(root: &Path) -> String {
+    let mut s = std::env::var("HOME").map_or_else(
+        |_| root.display().to_string(),
+        |home| {
+            let home_path = PathBuf::from(home);
+            root.strip_prefix(&home_path).map_or_else(
+                |_| root.display().to_string(),
+                |rel| {
+                    if rel.as_os_str().is_empty() {
+                        "~".to_owned()
+                    } else {
+                        format!("~/{}", rel.display())
+                    }
+                },
+            )
+        },
+    );
+    if !s.ends_with('/') {
+        s.push('/');
+    }
+    s
 }
 
 /// Walk the directory collecting files, respecting

@@ -44,7 +44,7 @@ impl Theme {
 
     /// The default fallback theme (VS Code dark).
     pub fn fallback() -> Self {
-        vs_light()
+        vs_dark()
     }
 }
 
@@ -122,6 +122,12 @@ pub fn vs_dark() -> Theme {
     s.insert("ui.separator".into(), style_fg(rgb(0x45, 0x45, 0x45)));
     s.insert("ui.virtual".into(), style_fg(rgb(0x2F, 0x2F, 0x2F)));
     s.insert("ui.match".into(), Style::default().bg(rgb(0x26, 0x4F, 0x78)));
+    s.insert(
+        "ui.picker.selected".into(),
+        Style::default().bg(rgb(0x37, 0x37, 0x3D)),
+    );
+    s.insert("ui.picker.count".into(), style_fg(rgb(0x5F, 0xAF, 0x5F)));
+    s.insert("ui.picker.prompt".into(), style_fg(rgb(0x6B, 0x6B, 0x6B)));
 
     // ── Syntax ──
     s.insert(
@@ -215,6 +221,12 @@ pub fn vs_light() -> Theme {
     s.insert("ui.separator".into(), style_fg(rgb(0xD4, 0xD4, 0xD4)));
     s.insert("ui.virtual".into(), style_fg(rgb(0xF2, 0xF2, 0xF2)));
     s.insert("ui.match".into(), Style::default().bg(rgb(0x90, 0xC2, 0xF9)));
+    s.insert(
+        "ui.picker.selected".into(),
+        Style::default().bg(rgb(0xE5, 0xE5, 0xE5)),
+    );
+    s.insert("ui.picker.count".into(), style_fg(rgb(0x09, 0x86, 0x58)));
+    s.insert("ui.picker.prompt".into(), style_fg(rgb(0x6F, 0x6F, 0x6F)));
 
     // ── Syntax ──
     s.insert(
