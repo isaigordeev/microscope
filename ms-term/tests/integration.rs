@@ -556,3 +556,118 @@ fn visual_mode_indicator() {
     }
     assert_eq!(editor.mode.display_name(), "VISUAL LINE");
 }
+
+// ── Search (verified against nvim -u NONE) ────────
+
+#[test]
+fn search_forward() {
+    test(("#[|]#hello hello", "/ll<ret>", "he#[|]#llo hello"));
+}
+
+#[test]
+fn search_starts_after_cursor() {
+    test(("he#[|]#llo hello", "/ll<ret>", "hello he#[|]#llo"));
+}
+
+#[test]
+fn search_n_wraps() {
+    test(("#[|]#hello hello", "/ll<ret>nn", "he#[|]#llo hello"));
+}
+
+#[test]
+fn search_backward() {
+    test(("hello h#[|]#ello", "?ll<ret>", "he#[|]#llo hello"));
+}
+
+#[test]
+fn search_n_reverse_wraps() {
+    test(("#[|]#ab ab ab", "/ab<ret>N", "#[|]#ab ab ab"));
+}
+
+#[test]
+fn search_incremental_moves_cursor() {
+    // still in the prompt — incsearch preview
+    test(("#[|]#hello", "/lo", "hel#[|]#lo"));
+}
+
+#[test]
+fn search_esc_restores_cursor() {
+    test(("he#[|]#llo", "/lo<esc>", "he#[|]#llo"));
+}
+
+#[test]
+fn search_not_found_keeps_cursor() {
+    let mut editor = test_editor("#[|]#abc");
+    for key in parse_keys("/zz<ret>") {
+        ms_term::application::handle_key(&mut editor, key);
+    }
+    assert_eq!(editor_annotated(&editor), "#[|]#abc");
+    assert_eq!(
+        editor.status_message.as_deref(),
+        Some("Pattern not found: zz"),
+    );
+}
+
+#[test]
+fn star_jumps_to_next_word() {
+    test(("#[|]#foo bar foo baz foo", "*", "foo bar #[|]#foo baz foo"));
+}
+
+#[test]
+fn star_matches_whole_word_only() {
+    test(("#[|]#foo foobar foo", "*", "foo foobar #[|]#foo"));
+}
+
+#[test]
+fn star_then_n() {
+    test(("#[|]#foo bar foo baz foo", "*n", "foo bar foo baz #[|]#foo"));
+}
+
+#[test]
+fn hash_searches_backward() {
+    test(("foo bar fo#[|]#o", "#", "#[|]#foo bar foo"));
+}
+
+// ── Marks (verified against nvim -u NONE) ─────────
+
+#[test]
+fn mark_line_goes_to_first_non_blank() {
+    test(("  a#[|]#bc\nxyz", "maj'a", "  #[|]#abc\nxyz"));
+}
+
+#[test]
+fn mark_char_goes_to_exact_position() {
+    test(("  a#[|]#bc\nxyz", "maj`a", "  a#[|]#bc\nxyz"));
+}
+
+#[test]
+fn delete_to_mark_char_is_exclusive() {
+    test(("a#[|]#bcdef", "malld`a", "a#[|]#def"));
+}
+
+#[test]
+fn delete_to_mark_line_is_linewise() {
+    test(("a#[|]#bc\ndef\nghi", "majjd'a", "#[|]#"));
+}
+
+#[test]
+fn missing_mark_is_noop() {
+    test(("ab#[|]#c", "'z", "ab#[|]#c"));
+}
+
+// ── Find repeat (;/,) ─────────────────────────────
+
+#[test]
+fn semicolon_repeats_find() {
+    test(("#[|]#a.b.c.d", "f.;", "a.b#[|]#.c.d"));
+}
+
+#[test]
+fn comma_reverses_repeat() {
+    test(("#[|]#a.b.c.d", "f.;;,", "a.b#[|]#.c.d"));
+}
+
+#[test]
+fn delete_with_semicolon() {
+    test(("#[|]#a.b.c", "f.d;", "a#[|]#c"));
+}

@@ -1,6 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use ms_core::movement;
+use ms_core::search;
 use ms_core::textobject;
 use ms_core::transaction::Transaction;
 use ms_tui::buffer::Rect;
@@ -64,11 +65,17 @@ pub(crate) fn handle_key(editor: &mut Editor, key: KeyEvent) {
         Mode::Normal => handle_normal(editor, key),
         Mode::Insert => handle_insert(editor, key),
         Mode::Command => handle_command(editor, key),
+        Mode::Search { backward } => handle_search_key(editor, key, backward),
         Mode::Visual { .. } => handle_visual(editor, key),
     }
 }
 
 pub(crate) fn handle_normal(editor: &mut Editor, key: KeyEvent) {
+    if key.code == KeyCode::Esc {
+        // Esc in normal mode clears search highlight
+        // (user's `nohlsearch` mapping, built in).
+        editor.search.active = false;
+    }
     let input = to_key_input(key);
     let action = editor.vim.feed(input);
     execute_action(editor, action);
@@ -145,6 +152,149 @@ pub(crate) fn handle_command(editor: &mut Editor, key: KeyEvent) {
     }
 }
 
+// ── Search prompt ─────────────────────────────────
+
+pub(crate) fn handle_search_key(
+    editor: &mut Editor,
+    key: KeyEvent,
+    backward: bool,
+) {
+    match key.code {
+        KeyCode::Esc => {
+            // Cancel: restore the cursor to where the
+            // search started.
+            let origin = editor.search_origin;
+            editor.enter_normal();
+            set_cursor_from_pos(editor, origin);
+            editor.command_buffer.clear();
+        }
+        KeyCode::Enter => {
+            commit_search(editor, backward);
+        }
+        KeyCode::Backspace => {
+            if editor.command_buffer.is_empty() {
+                let origin = editor.search_origin;
+                editor.enter_normal();
+                set_cursor_from_pos(editor, origin);
+            } else {
+                editor.command_buffer.pop();
+                incremental_search(editor, backward);
+            }
+        }
+        KeyCode::Char(c) => {
+            editor.command_buffer.push(c);
+            incremental_search(editor, backward);
+        }
+        _ => {}
+    }
+}
+
+/// Live cursor preview while typing the pattern
+/// (vim 'incsearch').
+fn incremental_search(editor: &mut Editor, backward: bool) {
+    let origin = editor.search_origin;
+    let found = search::compile(&editor.command_buffer).and_then(|re| {
+        if backward {
+            search::find_backward(&editor.document.text, &re, origin)
+        } else {
+            search::find_forward(&editor.document.text, &re, origin + 1)
+        }
+    });
+    set_cursor_from_pos(editor, found.map_or(origin, |(start, _)| start));
+}
+
+fn commit_search(editor: &mut Editor, backward: bool) {
+    let origin = editor.search_origin;
+    let pattern = if editor.command_buffer.is_empty() {
+        // Bare `/` repeats the previous search.
+        editor.search.pattern.clone()
+    } else {
+        editor.command_buffer.clone()
+    };
+    editor.enter_normal();
+    editor.command_buffer.clear();
+
+    if pattern.is_empty() {
+        editor.status_message = Some("No previous search".to_owned());
+        return;
+    }
+    let Some(re) = search::compile(&pattern) else {
+        editor.status_message = Some(format!("Invalid pattern: {pattern}"));
+        set_cursor_from_pos(editor, origin);
+        return;
+    };
+    let found = if backward {
+        search::find_backward(&editor.document.text, &re, origin)
+    } else {
+        search::find_forward(&editor.document.text, &re, origin + 1)
+    };
+    editor.search.pattern.clone_from(&pattern);
+    editor.search.backward = backward;
+    editor.search.active = true;
+    if let Some((start, _)) = found {
+        set_cursor_from_pos(editor, start);
+    } else {
+        editor.status_message = Some(format!("Pattern not found: {pattern}"));
+        set_cursor_from_pos(editor, origin);
+    }
+}
+
+/// `n` / `N`: jump to the next/previous match of the
+/// committed pattern.
+fn search_next(editor: &mut Editor, reverse: bool, count: usize) {
+    if editor.search.pattern.is_empty() {
+        editor.status_message = Some("No previous search".to_owned());
+        return;
+    }
+    let Some(re) = search::compile(&editor.search.pattern) else {
+        return;
+    };
+    let backward = editor.search.backward != reverse;
+    let mut pos = cursor_pos(editor);
+    for _ in 0..count.max(1) {
+        let found = if backward {
+            search::find_backward(&editor.document.text, &re, pos)
+        } else {
+            search::find_forward(&editor.document.text, &re, pos + 1)
+        };
+        if let Some((start, _)) = found {
+            pos = start;
+        } else {
+            editor.status_message =
+                Some(format!("Pattern not found: {}", editor.search.pattern,));
+            return;
+        }
+    }
+    editor.search.active = true;
+    set_cursor_from_pos(editor, pos);
+}
+
+/// `*` / `#`: whole-word search for the word under
+/// the cursor.
+fn search_word(editor: &mut Editor, backward: bool, count: usize) {
+    let text = &editor.document.text;
+    let pos = cursor_pos(editor);
+    if pos >= text.len_chars()
+        || movement::char_category(text.char(pos), false)
+            != movement::CharCat::Word
+    {
+        editor.status_message = Some("No word under cursor".to_owned());
+        return;
+    }
+    let Some((start, end)) = textobject::word(text, pos, 1, false, false)
+    else {
+        return;
+    };
+    let word: String = text.slice(start..end).chars().collect();
+    editor.search.pattern = search::word_pattern(&word);
+    editor.search.backward = backward;
+    editor.search.active = true;
+    // Jump off from the start of the current word so
+    // `#` finds the previous occurrence, not this one.
+    set_cursor_from_pos(editor, start);
+    search_next(editor, false, count.max(1));
+}
+
 pub(crate) fn execute_command(editor: &mut Editor, cmd: &str) {
     let cmd = cmd.trim();
     let (word, arg) = cmd
@@ -209,6 +359,7 @@ pub(crate) fn execute_command(editor: &mut Editor, cmd: &str) {
 pub(crate) fn execute_action(editor: &mut Editor, action: Action) {
     match action {
         Action::Move(motion, count) => {
+            let motion = remember_or_repeat_find(editor, motion);
             execute_motion(editor, motion, count);
         }
         Action::OperatorMotion { operator, motion, count } => {
@@ -222,6 +373,7 @@ pub(crate) fn execute_action(editor: &mut Editor, action: Action) {
             } else {
                 motion
             };
+            let motion = remember_or_repeat_find(editor, motion);
             let (start, end, mt) = motion_range(editor, motion, count);
             if start != end {
                 apply_operator(editor, operator, start, end, mt);
@@ -247,6 +399,11 @@ pub(crate) fn execute_action(editor: &mut Editor, action: Action) {
         }
         Action::EnterCommand => {
             editor.enter_command();
+        }
+        Action::EnterSearch { backward } => {
+            editor.search_origin = cursor_pos(editor);
+            editor.command_buffer.clear();
+            editor.mode = Mode::Search { backward };
         }
         Action::Special(cmd, count) => {
             execute_special(editor, cmd, count);
@@ -499,6 +656,35 @@ fn set_insert_at(editor: &mut Editor, pos: usize) {
     editor.view.ensure_cursor_visible();
 }
 
+/// Record `f`/`F`/`t`/`T` for later `;`/`,` repeat,
+/// and substitute `;`/`,` with the recorded find.
+fn remember_or_repeat_find(editor: &mut Editor, motion: Motion) -> Motion {
+    match motion {
+        Motion::FindChar(_)
+        | Motion::FindCharBack(_)
+        | Motion::TillChar(_)
+        | Motion::TillCharBack(_) => {
+            editor.last_find = Some(motion);
+            motion
+        }
+        Motion::RepeatFind => editor.last_find.unwrap_or(motion),
+        Motion::RepeatFindReverse => {
+            editor.last_find.map_or(motion, reverse_find)
+        }
+        m => m,
+    }
+}
+
+const fn reverse_find(motion: Motion) -> Motion {
+    match motion {
+        Motion::FindChar(c) => Motion::FindCharBack(c),
+        Motion::FindCharBack(c) => Motion::FindChar(c),
+        Motion::TillChar(c) => Motion::TillCharBack(c),
+        Motion::TillCharBack(c) => Motion::TillChar(c),
+        m => m,
+    }
+}
+
 // ── Motion execution ──────────────────────────────
 
 pub(crate) fn cursor_pos(editor: &Editor) -> usize {
@@ -662,6 +848,20 @@ pub(crate) fn resolve_motion(
         Motion::MatchBracket => {
             movement::find_matching_bracket(text, pos).unwrap_or(pos)
         }
+        Motion::MarkLine(c) => editor.marks.get(&c).map_or(pos, |&mark| {
+            let line =
+                editor.document.text.char_to_line(mark.min(text.len_chars()));
+            let col = editor.first_non_blank_col(line);
+            editor.document.line_col_to_char(line, col)
+        }),
+        Motion::MarkChar(c) => editor
+            .marks
+            .get(&c)
+            .map_or(pos, |&mark| mark.min(text.len_chars().saturating_sub(1))),
+        // `;`/`,` are substituted by
+        // `remember_or_repeat_find` before resolution;
+        // with no recorded find they are no-ops.
+        Motion::RepeatFind | Motion::RepeatFindReverse => pos,
         Motion::ScreenTop => {
             let line = editor.view.scroll_offset;
             editor.document.line_col_to_char(line, 0)
@@ -1171,6 +1371,22 @@ pub(crate) fn execute_special(
             for _ in 0..count {
                 redo(editor);
             }
+        }
+        SpecialCommand::SearchNext => {
+            search_next(editor, false, count);
+        }
+        SpecialCommand::SearchPrev => {
+            search_next(editor, true, count);
+        }
+        SpecialCommand::SearchWordForward => {
+            search_word(editor, false, count);
+        }
+        SpecialCommand::SearchWordBackward => {
+            search_word(editor, true, count);
+        }
+        SpecialCommand::SetMark(c) => {
+            let pos = cursor_pos(editor);
+            editor.marks.insert(c, pos);
         }
         SpecialCommand::DotRepeat => {
             // TODO: dot repeat (needs last-action

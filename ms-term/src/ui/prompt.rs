@@ -9,10 +9,19 @@ use crate::compositor::{
     Callback, Component, Context, CursorKind, EventResult, Position,
 };
 
-/// Command-line prompt component (`:` commands).
-/// Pushed as a layer on top of `EditorView`.
+/// What the prompt is for.
+#[derive(Debug, Clone, Copy)]
+enum PromptKind {
+    Command,
+    Search { backward: bool },
+}
+
+/// Command-line prompt component (`:` commands and
+/// `/`/`?` search). Pushed as a layer on top of
+/// `EditorView`.
 #[derive(Debug)]
 pub struct Prompt {
+    kind: PromptKind,
     prefix: String,
     input: String,
 }
@@ -20,7 +29,20 @@ pub struct Prompt {
 impl Prompt {
     /// Create a command prompt (`:`).
     pub fn command() -> Self {
-        Self { prefix: ":".to_owned(), input: String::new() }
+        Self {
+            kind: PromptKind::Command,
+            prefix: ":".to_owned(),
+            input: String::new(),
+        }
+    }
+
+    /// Create a search prompt (`/` or `?`).
+    pub fn search(backward: bool) -> Self {
+        Self {
+            kind: PromptKind::Search { backward },
+            prefix: if backward { "?" } else { "/" }.to_owned(),
+            input: String::new(),
+        }
     }
 }
 
@@ -33,6 +55,18 @@ impl Component for Prompt {
         let Event::Key(key) = event else {
             return EventResult::Ignored(None);
         };
+
+        if let PromptKind::Search { backward } = self.kind {
+            // Search state lives on the editor
+            // (command_buffer) so the headless path
+            // and incremental search share the logic.
+            commands::handle_search_key(ctx.editor, *key, backward);
+            self.input.clone_from(&ctx.editor.command_buffer);
+            if matches!(ctx.editor.mode, Mode::Search { .. }) {
+                return EventResult::Consumed(None);
+            }
+            return EventResult::Consumed(Some(Box::new(pop_self)));
+        }
 
         match key.code {
             KeyCode::Esc => {

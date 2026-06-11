@@ -1,11 +1,25 @@
+use std::collections::HashMap;
+
 use ms_core::history::History;
 
-use crate::command::VimMachine;
+use crate::command::{Motion, VimMachine};
 use crate::document::Document;
 use crate::mode::Mode;
 use crate::register::Registers;
 use crate::theme::Theme;
 use crate::view::View;
+
+/// Committed search state (vim `/`, `?`, `n`, `*`).
+#[derive(Debug, Default)]
+pub struct SearchState {
+    /// Last committed pattern (regex source).
+    pub pattern: String,
+    /// Direction of the last search command.
+    pub backward: bool,
+    /// Whether match highlighting is on
+    /// (Esc = :nohlsearch turns it off).
+    pub active: bool,
+}
 
 /// Global editor state.
 #[derive(Debug)]
@@ -14,7 +28,8 @@ pub struct Editor {
     pub view: View,
     pub mode: Mode,
     pub should_quit: bool,
-    /// Command line buffer (for `:` prompt).
+    /// Command line buffer (for `:` and search
+    /// prompts).
     pub command_buffer: String,
     /// Status message (shown at bottom, clears on next key).
     pub status_message: Option<String>,
@@ -28,6 +43,17 @@ pub struct Editor {
     pub yank_register: char,
     /// Active color theme.
     pub theme: Theme,
+    /// Search state (`/`, `?`, `n`, `N`, `*`, `#`).
+    pub search: SearchState,
+    /// Cursor position when the search prompt opened
+    /// (incremental search jumps from here; Esc
+    /// restores it).
+    pub search_origin: usize,
+    /// Marks (`m{a-z}`) as char positions. Not yet
+    /// adjusted on edits.
+    pub marks: HashMap<char, usize>,
+    /// Last `f`/`F`/`t`/`T` motion, for `;` and `,`.
+    pub last_find: Option<Motion>,
 }
 
 impl Editor {
@@ -44,6 +70,10 @@ impl Editor {
             history: History::new(),
             yank_register: '"',
             theme: Theme::default(),
+            search: SearchState::default(),
+            search_origin: 0,
+            marks: HashMap::new(),
+            last_find: None,
         }
     }
 
@@ -75,9 +105,9 @@ impl Editor {
                     line_len - 1
                 }
             }
-            // Insert/Command: cursor can be after last
-            // char.
-            Mode::Insert | Mode::Command => line_len,
+            // Insert/Command/Search: cursor can be
+            // after last char.
+            Mode::Insert | Mode::Command | Mode::Search { .. } => line_len,
         };
         if self.view.cursor_col > max_col {
             self.view.cursor_col = max_col;

@@ -78,6 +78,14 @@ pub enum Motion {
     ScreenTop,
     ScreenMiddle,
     ScreenBottom,
+    /// `'{mark}` — mark line, first non-blank.
+    MarkLine(char),
+    /// `` `{mark} `` — exact mark position.
+    MarkChar(char),
+    /// `;` — repeat last `f`/`F`/`t`/`T`.
+    RepeatFind,
+    /// `,` — repeat last find, reversed.
+    RepeatFindReverse,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,7 +108,8 @@ impl Motion {
             | Self::ParagraphBackward
             | Self::ScreenTop
             | Self::ScreenMiddle
-            | Self::ScreenBottom => MotionType::Linewise,
+            | Self::ScreenBottom
+            | Self::MarkLine(_) => MotionType::Linewise,
             _ => MotionType::Charwise,
         }
     }
@@ -196,6 +205,11 @@ pub enum SpecialCommand {
     Undo,
     Redo,
     DotRepeat,
+    SearchNext,
+    SearchPrev,
+    SearchWordForward,
+    SearchWordBackward,
+    SetMark(char),
 }
 
 // ── Action (output) ───────────────────────────────
@@ -212,6 +226,8 @@ pub enum Action {
     EnterInsert(InsertVariant),
     /// Enter command mode.
     EnterCommand,
+    /// Open the search prompt (`/` or `?`).
+    EnterSearch { backward: bool },
     /// Special single-key command.
     Special(SpecialCommand, usize),
     /// Enter (or toggle) visual mode (`v`/`V`).
@@ -293,6 +309,11 @@ enum CharPurpose {
     OpFindCharBack { operator: Operator },
     OpTillChar { operator: Operator },
     OpTillCharBack { operator: Operator },
+    SetMark,
+    MarkLine,
+    MarkChar,
+    OpMarkLine { operator: Operator },
+    OpMarkChar { operator: Operator },
 }
 
 // ── VimMachine ────────────────────────────────────
@@ -519,6 +540,31 @@ impl VimMachine {
                 Action::None
             }
 
+            // Marks
+            KeyCode::Char('m') => {
+                self.state =
+                    VimState::WaitingChar { purpose: CharPurpose::SetMark };
+                Action::None
+            }
+            KeyCode::Char('\'') => {
+                self.state =
+                    VimState::WaitingChar { purpose: CharPurpose::MarkLine };
+                Action::None
+            }
+            KeyCode::Char('`') => {
+                self.state =
+                    VimState::WaitingChar { purpose: CharPurpose::MarkChar };
+                Action::None
+            }
+
+            // Search
+            KeyCode::Char('/') => {
+                self.emit_and_reset(Action::EnterSearch { backward: false })
+            }
+            KeyCode::Char('?') => {
+                self.emit_and_reset(Action::EnterSearch { backward: true })
+            }
+
             // Visual mode entry
             KeyCode::Char('v') => {
                 self.emit_and_reset(Action::EnterVisual(VisualKind::Char))
@@ -630,6 +676,20 @@ impl VimMachine {
             // g prefix in operator-pending
             KeyCode::Char('g') => {
                 self.state = VimState::WaitingGOp { operator };
+                Action::None
+            }
+
+            // Marks as motions (d'a / d`a)
+            KeyCode::Char('\'') => {
+                self.state = VimState::WaitingChar {
+                    purpose: CharPurpose::OpMarkLine { operator },
+                };
+                Action::None
+            }
+            KeyCode::Char('`') => {
+                self.state = VimState::WaitingChar {
+                    purpose: CharPurpose::OpMarkChar { operator },
+                };
                 Action::None
             }
 
@@ -786,6 +846,30 @@ impl VimMachine {
                 self.emit_and_reset(Action::OperatorMotion {
                     operator,
                     motion: Motion::TillCharBack(c),
+                    count,
+                })
+            }
+            CharPurpose::SetMark => self.emit_and_reset(Action::Special(
+                SpecialCommand::SetMark(c),
+                1,
+            )),
+            CharPurpose::MarkLine => {
+                self.emit_and_reset(Action::Move(Motion::MarkLine(c), 1))
+            }
+            CharPurpose::MarkChar => {
+                self.emit_and_reset(Action::Move(Motion::MarkChar(c), 1))
+            }
+            CharPurpose::OpMarkLine { operator } => {
+                self.emit_and_reset(Action::OperatorMotion {
+                    operator,
+                    motion: Motion::MarkLine(c),
+                    count,
+                })
+            }
+            CharPurpose::OpMarkChar { operator } => {
+                self.emit_and_reset(Action::OperatorMotion {
+                    operator,
+                    motion: Motion::MarkChar(c),
                     count,
                 })
             }
@@ -976,6 +1060,18 @@ impl VimMachine {
                 };
                 Action::None
             }
+            KeyCode::Char('\'') => {
+                self.state = VimState::VisualWaitingChar {
+                    purpose: CharPurpose::MarkLine,
+                };
+                Action::None
+            }
+            KeyCode::Char('`') => {
+                self.state = VimState::VisualWaitingChar {
+                    purpose: CharPurpose::MarkChar,
+                };
+                Action::None
+            }
 
             // Selection control
             KeyCode::Char('o') => self.emit_and_reset(Action::SwapAnchor),
@@ -1059,6 +1155,8 @@ impl VimMachine {
             CharPurpose::FindCharBack => Motion::FindCharBack(c),
             CharPurpose::TillChar => Motion::TillChar(c),
             CharPurpose::TillCharBack => Motion::TillCharBack(c),
+            CharPurpose::MarkLine => Motion::MarkLine(c),
+            CharPurpose::MarkChar => Motion::MarkChar(c),
             _ => {
                 self.reset();
                 return Action::None;
@@ -1108,6 +1206,8 @@ impl VimMachine {
             '{' => Some(Motion::ParagraphBackward),
             '}' => Some(Motion::ParagraphForward),
             '%' => Some(Motion::MatchBracket),
+            ';' => Some(Motion::RepeatFind),
+            ',' => Some(Motion::RepeatFindReverse),
             'H' => Some(Motion::ScreenTop),
             'M' => Some(Motion::ScreenMiddle),
             'L' => Some(Motion::ScreenBottom),
@@ -1131,6 +1231,10 @@ impl VimMachine {
             'P' => Action::Special(SpecialCommand::PasteBefore, count),
             'u' => Action::Special(SpecialCommand::Undo, count),
             '.' => Action::Special(SpecialCommand::DotRepeat, count),
+            'n' => Action::Special(SpecialCommand::SearchNext, count),
+            'N' => Action::Special(SpecialCommand::SearchPrev, count),
+            '*' => Action::Special(SpecialCommand::SearchWordForward, count),
+            '#' => Action::Special(SpecialCommand::SearchWordBackward, count),
             _ => return None,
         };
         Some(self.emit_and_reset(action))
@@ -1788,6 +1892,104 @@ mod tests {
         assert_eq!(
             m.feed_visual(key('V')),
             Action::EnterVisual(VisualKind::Line),
+        );
+    }
+
+    // ── Search keys ───────────────────────────────
+
+    #[test]
+    fn slash_enters_search() {
+        let mut m = VimMachine::new();
+        assert_eq!(m.feed(key('/')), Action::EnterSearch { backward: false },);
+    }
+
+    #[test]
+    fn question_enters_backward_search() {
+        let mut m = VimMachine::new();
+        assert_eq!(m.feed(key('?')), Action::EnterSearch { backward: true });
+    }
+
+    #[test]
+    fn n_is_search_next() {
+        let mut m = VimMachine::new();
+        assert_eq!(
+            m.feed(key('n')),
+            Action::Special(SpecialCommand::SearchNext, 1),
+        );
+    }
+
+    #[test]
+    fn count_n() {
+        let mut m = VimMachine::new();
+        m.feed(key('3'));
+        assert_eq!(
+            m.feed(key('n')),
+            Action::Special(SpecialCommand::SearchNext, 3),
+        );
+    }
+
+    #[test]
+    fn star_searches_word() {
+        let mut m = VimMachine::new();
+        assert_eq!(
+            m.feed(key('*')),
+            Action::Special(SpecialCommand::SearchWordForward, 1),
+        );
+    }
+
+    // ── Marks ─────────────────────────────────────
+
+    #[test]
+    fn set_mark() {
+        let mut m = VimMachine::new();
+        m.feed(key('m'));
+        assert_eq!(
+            m.feed(key('a')),
+            Action::Special(SpecialCommand::SetMark('a'), 1),
+        );
+    }
+
+    #[test]
+    fn goto_mark_line() {
+        let mut m = VimMachine::new();
+        m.feed(key('\''));
+        assert_eq!(m.feed(key('a')), Action::Move(Motion::MarkLine('a'), 1));
+    }
+
+    #[test]
+    fn goto_mark_char() {
+        let mut m = VimMachine::new();
+        m.feed(key('`'));
+        assert_eq!(m.feed(key('a')), Action::Move(Motion::MarkChar('a'), 1));
+    }
+
+    #[test]
+    fn delete_to_mark_line() {
+        let mut m = VimMachine::new();
+        m.feed(key('d'));
+        m.feed(key('\''));
+        assert_eq!(
+            m.feed(key('a')),
+            Action::OperatorMotion {
+                operator: Operator::Delete,
+                motion: Motion::MarkLine('a'),
+                count: 1,
+            },
+        );
+    }
+
+    #[test]
+    fn semicolon_repeats_find() {
+        let mut m = VimMachine::new();
+        assert_eq!(m.feed(key(';')), Action::Move(Motion::RepeatFind, 1));
+    }
+
+    #[test]
+    fn comma_reverses_find() {
+        let mut m = VimMachine::new();
+        assert_eq!(
+            m.feed(key(',')),
+            Action::Move(Motion::RepeatFindReverse, 1),
         );
     }
 }

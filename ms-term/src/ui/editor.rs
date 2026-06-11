@@ -52,6 +52,11 @@ impl Component for EditorView {
                 commands::handle_command(ctx.editor, *key);
                 EventResult::Consumed(None)
             }
+            Mode::Search { backward } => {
+                // Prompt handles this — safety fallback.
+                commands::handle_search_key(ctx.editor, *key, backward);
+                EventResult::Consumed(None)
+            }
             Mode::Visual { .. } => {
                 ctx.editor.status_message = None;
                 commands::handle_visual(ctx.editor, *key);
@@ -93,6 +98,9 @@ impl Component for EditorView {
             }
         }
 
+        // ── Search match highlight ──
+        render_search_matches(area, surface, ctx.editor, text_height);
+
         // ── Selection highlight ──
         if let Mode::Visual { kind, anchor } = ctx.editor.mode {
             render_selection(
@@ -120,9 +128,59 @@ impl Component for EditorView {
         let row = editor.view.cursor_screen_row();
         let kind = match editor.mode {
             Mode::Normal | Mode::Visual { .. } => CursorKind::Block,
-            Mode::Insert | Mode::Command => CursorKind::Bar,
+            Mode::Insert | Mode::Command | Mode::Search { .. } => {
+                CursorKind::Bar
+            }
         };
         (Some(Position { col, row }), kind)
+    }
+}
+
+/// Overlay `ui.match` on search matches: the active
+/// pattern while typing in the search prompt, or the
+/// committed pattern while highlighting is on.
+fn render_search_matches(
+    area: Rect,
+    surface: &mut Buffer,
+    editor: &Editor,
+    text_height: u16,
+) {
+    let pattern = match editor.mode {
+        Mode::Search { .. } if !editor.command_buffer.is_empty() => {
+            editor.command_buffer.as_str()
+        }
+        _ if editor.search.active && !editor.search.pattern.is_empty() => {
+            editor.search.pattern.as_str()
+        }
+        _ => return,
+    };
+    let Some(re) = ms_core::search::compile(pattern) else {
+        return;
+    };
+    let style = editor.theme.resolve("ui.match");
+    let text = &editor.document.text;
+    let max_width = area.width.saturating_sub(GUTTER_WIDTH);
+
+    for (start, end) in ms_core::search::find_all(text, &re) {
+        for row in 0..text_height {
+            let doc_line = editor.view.scroll_offset + row as usize;
+            if editor.document.line(doc_line).is_none() {
+                break;
+            }
+            let line_start = text.line_to_char(doc_line);
+            let line_len = editor.document.line_len(doc_line);
+            let line_end = line_start + line_len;
+            if end <= line_start || start >= line_end {
+                continue;
+            }
+            let from = start.max(line_start) - line_start;
+            let to = (end.min(line_end) - line_start).max(from + 1);
+            let width =
+                u16::try_from(to - from).unwrap_or(u16::MAX).min(max_width);
+            let x = GUTTER_WIDTH
+                .saturating_add(u16::try_from(from).unwrap_or(u16::MAX));
+            surface.set_style(x, row, width, style);
+        }
     }
 }
 
@@ -209,6 +267,10 @@ impl EditorView {
         }
 
         // ── Normal VimMachine dispatch ──
+        if key.code == KeyCode::Esc {
+            // Built-in `nohlsearch` on Esc.
+            ctx.editor.search.active = false;
+        }
         let input = commands::to_key_input(*key);
         let action = ctx.editor.vim.feed(input);
 
@@ -216,6 +278,13 @@ impl EditorView {
             ctx.editor.mode = Mode::Command;
             let cb: Callback = Box::new(|compositor, _ctx| {
                 compositor.push(Box::new(Prompt::command()));
+            });
+            return EventResult::Consumed(Some(cb));
+        }
+        if let Action::EnterSearch { backward } = action {
+            commands::execute_action(ctx.editor, action);
+            let cb: Callback = Box::new(move |compositor, _ctx| {
+                compositor.push(Box::new(Prompt::search(backward)));
             });
             return EventResult::Consumed(Some(cb));
         }

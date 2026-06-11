@@ -98,17 +98,29 @@ Verify: u undoes, Ctrl-R redoes, "ayy + "ap works, branch undo
 
 ---
 
-M1e — Search + Marks                                       [TODO]
+M1e — Search + Marks                                       [DONE]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-New: ms-core/src/search.rs — regex search over rope (ripgrep)
+New: ms-core/src/search.rs — regex search over rope
+     (regex crate directly, not grep-*; byte→char via
+     rope.byte_to_char; wrapscan; \b word patterns)
 
-Search: /pattern, ?pattern, n, N, *, #, incremental highlight
-Marks: m{a-z}, '{a-z}, `{a-z}
-Find char: f/F/t/T/;/, (wired in M1b, implemented here)
-Mode additions: Search { direction }
-Dep: grep-regex + grep-searcher (ripgrep crates)
+Search: /pattern, ?pattern, n, N, *, # — all wired.
+Incremental search (cursor preview + live ui.match
+highlight while typing). Esc in prompt restores cursor;
+Esc in normal mode = built-in nohlsearch (user's map).
+Bare / repeats last pattern. Mode::Search { backward },
+prompt reuses command_buffer + Prompt::search layer.
+Marks: m{char}, '{mark} (linewise, first non-blank),
+`{mark} (charwise exclusive), d'a/d`a, work in visual.
+;/, repeat: Motion::RepeatFind substituted from
+editor.last_find before resolution (d; works).
+Behavior verified against nvim -u NONE headless.
 
-Verify: /fn highlights, n cycles, * searches word, ma + 'a jumps
+Deferred: mark adjustment on edits, smartcase,
+search history prompt (q/), search offsets (/pat/e),
+visual-mode n/N.
+
+Verify: /fn highlights, n cycles, * searches word ✓
 
 ---
 

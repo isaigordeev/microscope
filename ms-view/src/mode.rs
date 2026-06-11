@@ -17,6 +17,10 @@ pub enum Mode {
     Insert,
     /// Ex command line (`:` prompt).
     Command,
+    /// Search prompt (`/` or `?`).
+    Search {
+        backward: bool,
+    },
     /// Visual selection. `anchor` is the fixed end of
     /// the selection as a char index; the cursor is
     /// the moving head.
@@ -33,6 +37,7 @@ impl Mode {
             Self::Normal => "NORMAL",
             Self::Insert => "INSERT",
             Self::Command => "COMMAND",
+            Self::Search { .. } => "SEARCH",
             Self::Visual { kind: VisualKind::Char, .. } => "VISUAL",
             Self::Visual { kind: VisualKind::Line, .. } => "VISUAL LINE",
             Self::Visual { kind: VisualKind::Block, .. } => "VISUAL BLOCK",
