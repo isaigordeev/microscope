@@ -4,6 +4,12 @@
 //! `[count] operator [count] motion` grammar and emits
 //! `Action` values. No editor dependency — pure state
 //! machine.
+//!
+//! Normal-mode keys go through [`VimMachine::feed`];
+//! visual-mode keys through [`VimMachine::feed_visual`]
+//! (the editor owns the mode and routes accordingly).
+
+use crate::mode::VisualKind;
 
 // ── Key input (terminal-independent) ──────────────
 
@@ -106,8 +112,9 @@ impl Motion {
     pub const fn is_inclusive(self) -> bool {
         match self {
             // Inclusive: endpoint IS part of the range
-            Self::Right
-            | Self::WordEnd
+            // (`l` is exclusive in vim: `yl` yanks one
+            // char because the endpoint is excluded.)
+            Self::WordEnd
             | Self::WordEndBig
             | Self::LineEnd
             | Self::FindChar(_)
@@ -122,6 +129,37 @@ impl Motion {
             // Exclusive: endpoint is NOT in the range
             _ => false,
         }
+    }
+}
+
+// ── Text objects ──────────────────────────────────
+
+/// What a text object targets (the `w` in `iw`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextObjectTarget {
+    Word { big: bool },
+    Paragraph,
+    Quote(char),
+    Pair { open: char, close: char },
+}
+
+/// Map a key to a text object target (vim `iw`, `a(`,
+/// `i"`...).
+const fn char_to_textobject(c: char) -> Option<TextObjectTarget> {
+    match c {
+        'w' => Some(TextObjectTarget::Word { big: false }),
+        'W' => Some(TextObjectTarget::Word { big: true }),
+        'p' => Some(TextObjectTarget::Paragraph),
+        '"' | '\'' | '`' => Some(TextObjectTarget::Quote(c)),
+        '(' | ')' | 'b' => {
+            Some(TextObjectTarget::Pair { open: '(', close: ')' })
+        }
+        '{' | '}' | 'B' => {
+            Some(TextObjectTarget::Pair { open: '{', close: '}' })
+        }
+        '[' | ']' => Some(TextObjectTarget::Pair { open: '[', close: ']' }),
+        '<' | '>' => Some(TextObjectTarget::Pair { open: '<', close: '>' }),
+        _ => None,
     }
 }
 
@@ -176,6 +214,23 @@ pub enum Action {
     EnterCommand,
     /// Special single-key command.
     Special(SpecialCommand, usize),
+    /// Enter (or toggle) visual mode (`v`/`V`).
+    EnterVisual(VisualKind),
+    /// Leave visual mode (Esc).
+    ExitVisual,
+    /// Swap selection anchor and cursor (`o`).
+    SwapAnchor,
+    /// Operator applied to the visual selection.
+    VisualOperator(Operator),
+    /// Operator applied to a text object (`diw`).
+    OperatorTextObject {
+        operator: Operator,
+        around: bool,
+        target: TextObjectTarget,
+        count: usize,
+    },
+    /// Select a text object in visual mode (`viw`).
+    VisualTextObject { around: bool, target: TextObjectTarget, count: usize },
     /// No action (still pending or unrecognized).
     None,
 }
@@ -206,6 +261,25 @@ enum VimState {
     WaitingAngleOp {
         operator: Operator,
     },
+    /// After operator + `i`/`a`, waiting for the
+    /// object key (`diw` → waiting for `w`).
+    WaitingTextObject {
+        operator: Operator,
+        around: bool,
+    },
+    /// Visual mode: count digits seen.
+    VisualCount,
+    /// Visual mode: after `i`/`a`, waiting for the
+    /// object key.
+    VisualWaitingTextObject {
+        around: bool,
+    },
+    /// Visual mode: waiting for a find-char target.
+    VisualWaitingChar {
+        purpose: CharPurpose,
+    },
+    /// Visual mode: after `g` prefix.
+    VisualWaitingG,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -267,6 +341,50 @@ impl VimMachine {
             }
             VimState::WaitingAngleOp { operator } => {
                 self.feed_waiting_angle_op(key, operator)
+            }
+            VimState::WaitingTextObject { operator, around } => {
+                self.feed_waiting_textobject(key, operator, around)
+            }
+            // Stale visual sub-state (mode changed
+            // under us): start over in normal mode.
+            VimState::VisualCount
+            | VimState::VisualWaitingTextObject { .. }
+            | VimState::VisualWaitingChar { .. }
+            | VimState::VisualWaitingG => {
+                self.reset();
+                self.feed_normal(key)
+            }
+        }
+    }
+
+    /// Feed a key while the editor is in visual mode.
+    /// Same contract as [`Self::feed`].
+    pub fn feed_visual(&mut self, key: KeyInput) -> Action {
+        if key.code == KeyCode::Esc {
+            // Esc cancels a pending sub-command but
+            // only exits visual from the base state.
+            let exit =
+                matches!(self.state, VimState::Normal | VimState::VisualCount);
+            self.reset();
+            return if exit { Action::ExitVisual } else { Action::None };
+        }
+
+        match self.state.clone() {
+            VimState::Normal | VimState::VisualCount => {
+                self.feed_visual_normal(key)
+            }
+            VimState::VisualWaitingTextObject { around } => {
+                self.feed_visual_textobject(key, around)
+            }
+            VimState::VisualWaitingChar { purpose } => {
+                self.feed_visual_char(key, purpose)
+            }
+            VimState::VisualWaitingG => self.feed_visual_g(key),
+            // Stale normal-mode sub-state: start over
+            // in visual mode.
+            _ => {
+                self.reset();
+                self.feed_visual_normal(key)
             }
         }
     }
@@ -401,6 +519,14 @@ impl VimMachine {
                 Action::None
             }
 
+            // Visual mode entry
+            KeyCode::Char('v') => {
+                self.emit_and_reset(Action::EnterVisual(VisualKind::Char))
+            }
+            KeyCode::Char('V') => {
+                self.emit_and_reset(Action::EnterVisual(VisualKind::Line))
+            }
+
             // Motions
             KeyCode::Char(c) => {
                 if let Some(m) = self.char_to_motion(c) {
@@ -507,6 +633,18 @@ impl VimMachine {
                 Action::None
             }
 
+            // Text object prefix (diw / da")
+            KeyCode::Char('i') => {
+                self.state =
+                    VimState::WaitingTextObject { operator, around: false };
+                Action::None
+            }
+            KeyCode::Char('a') => {
+                self.state =
+                    VimState::WaitingTextObject { operator, around: true };
+                Action::None
+            }
+
             // Motion key
             KeyCode::Char(c) => {
                 if let Some(m) = self.char_to_motion(c) {
@@ -541,6 +679,16 @@ impl VimMachine {
                 self.count2 = Some(self.count2.unwrap_or(0) * 10 + d);
                 Action::None
             }
+            KeyCode::Char('i') => {
+                self.state =
+                    VimState::WaitingTextObject { operator, around: false };
+                Action::None
+            }
+            KeyCode::Char('a') => {
+                self.state =
+                    VimState::WaitingTextObject { operator, around: true };
+                Action::None
+            }
             KeyCode::Char(c) => {
                 if let Some(m) = self.char_to_motion(c) {
                     self.emit_and_reset(Action::OperatorMotion {
@@ -557,6 +705,31 @@ impl VimMachine {
                 self.reset();
                 Action::None
             }
+        }
+    }
+
+    // ── Waiting for text object key ───────────────
+
+    fn feed_waiting_textobject(
+        &mut self,
+        key: KeyInput,
+        operator: Operator,
+        around: bool,
+    ) -> Action {
+        let KeyCode::Char(c) = key.code else {
+            self.reset();
+            return Action::None;
+        };
+        if let Some(target) = char_to_textobject(c) {
+            self.emit_and_reset(Action::OperatorTextObject {
+                operator,
+                around,
+                target,
+                count: self.effective_count(),
+            })
+        } else {
+            self.reset();
+            Action::None
         }
     }
 
@@ -715,6 +888,202 @@ impl VimMachine {
         operator: Operator,
     ) -> Action {
         self.feed_operator_pending(key, operator)
+    }
+
+    // ── Visual mode ───────────────────────────────
+
+    #[allow(clippy::too_many_lines)]
+    fn feed_visual_normal(&mut self, key: KeyInput) -> Action {
+        if key.ctrl {
+            self.reset();
+            return Action::None;
+        }
+
+        match key.code {
+            // Count accumulation
+            KeyCode::Char(c @ '1'..='9') => {
+                let d = c as usize - '0' as usize;
+                self.count1 = Some(self.count1.unwrap_or(0) * 10 + d);
+                self.state = VimState::VisualCount;
+                Action::None
+            }
+            KeyCode::Char('0') if self.state == VimState::VisualCount => {
+                self.count1 = Some(self.count1.unwrap_or(0) * 10);
+                Action::None
+            }
+
+            // Operators on the selection
+            KeyCode::Char('d' | 'x') => {
+                self.emit_and_reset(Action::VisualOperator(Operator::Delete))
+            }
+            KeyCode::Char('c' | 's') => {
+                self.emit_and_reset(Action::VisualOperator(Operator::Change))
+            }
+            KeyCode::Char('y') => {
+                self.emit_and_reset(Action::VisualOperator(Operator::Yank))
+            }
+            KeyCode::Char('>') => {
+                self.emit_and_reset(Action::VisualOperator(Operator::Indent))
+            }
+            KeyCode::Char('<') => {
+                self.emit_and_reset(Action::VisualOperator(Operator::Dedent))
+            }
+            KeyCode::Char('~') => self
+                .emit_and_reset(Action::VisualOperator(Operator::ToggleCase)),
+            KeyCode::Char('u') => self
+                .emit_and_reset(Action::VisualOperator(Operator::Lowercase)),
+            KeyCode::Char('U') => self
+                .emit_and_reset(Action::VisualOperator(Operator::Uppercase)),
+
+            // Text objects (viw / va")
+            KeyCode::Char('i') => {
+                self.state =
+                    VimState::VisualWaitingTextObject { around: false };
+                Action::None
+            }
+            KeyCode::Char('a') => {
+                self.state =
+                    VimState::VisualWaitingTextObject { around: true };
+                Action::None
+            }
+
+            // Prefixes
+            KeyCode::Char('g') => {
+                self.state = VimState::VisualWaitingG;
+                Action::None
+            }
+            KeyCode::Char('f') => {
+                self.state = VimState::VisualWaitingChar {
+                    purpose: CharPurpose::FindChar,
+                };
+                Action::None
+            }
+            KeyCode::Char('F') => {
+                self.state = VimState::VisualWaitingChar {
+                    purpose: CharPurpose::FindCharBack,
+                };
+                Action::None
+            }
+            KeyCode::Char('t') => {
+                self.state = VimState::VisualWaitingChar {
+                    purpose: CharPurpose::TillChar,
+                };
+                Action::None
+            }
+            KeyCode::Char('T') => {
+                self.state = VimState::VisualWaitingChar {
+                    purpose: CharPurpose::TillCharBack,
+                };
+                Action::None
+            }
+
+            // Selection control
+            KeyCode::Char('o') => self.emit_and_reset(Action::SwapAnchor),
+            KeyCode::Char('v') => {
+                self.emit_and_reset(Action::EnterVisual(VisualKind::Char))
+            }
+            KeyCode::Char('V') => {
+                self.emit_and_reset(Action::EnterVisual(VisualKind::Line))
+            }
+
+            // Paste over selection
+            KeyCode::Char('p') => self.emit_and_reset(Action::Special(
+                SpecialCommand::Paste,
+                self.count1_val(),
+            )),
+            KeyCode::Char('P') => self.emit_and_reset(Action::Special(
+                SpecialCommand::PasteBefore,
+                self.count1_val(),
+            )),
+
+            // Motions extend the selection
+            KeyCode::Char(c) => {
+                if let Some(m) = self.char_to_motion(c) {
+                    self.emit_and_reset(Action::Move(m, self.count1_val()))
+                } else {
+                    self.reset();
+                    Action::None
+                }
+            }
+            KeyCode::Left => self
+                .emit_and_reset(Action::Move(Motion::Left, self.count1_val())),
+            KeyCode::Right => self.emit_and_reset(Action::Move(
+                Motion::Right,
+                self.count1_val(),
+            )),
+            KeyCode::Up => self
+                .emit_and_reset(Action::Move(Motion::Up, self.count1_val())),
+            KeyCode::Down => self
+                .emit_and_reset(Action::Move(Motion::Down, self.count1_val())),
+
+            _ => {
+                self.reset();
+                Action::None
+            }
+        }
+    }
+
+    fn feed_visual_textobject(
+        &mut self,
+        key: KeyInput,
+        around: bool,
+    ) -> Action {
+        let KeyCode::Char(c) = key.code else {
+            self.reset();
+            return Action::None;
+        };
+        if let Some(target) = char_to_textobject(c) {
+            self.emit_and_reset(Action::VisualTextObject {
+                around,
+                target,
+                count: self.effective_count(),
+            })
+        } else {
+            self.reset();
+            Action::None
+        }
+    }
+
+    fn feed_visual_char(
+        &mut self,
+        key: KeyInput,
+        purpose: CharPurpose,
+    ) -> Action {
+        let KeyCode::Char(c) = key.code else {
+            self.reset();
+            return Action::None;
+        };
+        let count = self.effective_count();
+        let motion = match purpose {
+            CharPurpose::FindChar => Motion::FindChar(c),
+            CharPurpose::FindCharBack => Motion::FindCharBack(c),
+            CharPurpose::TillChar => Motion::TillChar(c),
+            CharPurpose::TillCharBack => Motion::TillCharBack(c),
+            _ => {
+                self.reset();
+                return Action::None;
+            }
+        };
+        self.emit_and_reset(Action::Move(motion, count))
+    }
+
+    fn feed_visual_g(&mut self, key: KeyInput) -> Action {
+        match key.code {
+            KeyCode::Char('g') => self.emit_and_reset(Action::Move(
+                Motion::GotoTop,
+                self.count1_val(),
+            )),
+            KeyCode::Char('u') => self
+                .emit_and_reset(Action::VisualOperator(Operator::Lowercase)),
+            KeyCode::Char('U') => self
+                .emit_and_reset(Action::VisualOperator(Operator::Uppercase)),
+            KeyCode::Char('~') => self
+                .emit_and_reset(Action::VisualOperator(Operator::ToggleCase)),
+            _ => {
+                self.reset();
+                Action::None
+            }
+        }
     }
 
     // ── Helpers ───────────────────────────────────
@@ -1194,6 +1563,231 @@ mod tests {
                 motion: Motion::GotoTop,
                 count: 1,
             },
+        );
+    }
+
+    // ── Text objects ──────────────────────────────
+
+    #[test]
+    fn delete_inner_word() {
+        let mut m = VimMachine::new();
+        m.feed(key('d'));
+        m.feed(key('i'));
+        assert_eq!(
+            m.feed(key('w')),
+            Action::OperatorTextObject {
+                operator: Operator::Delete,
+                around: false,
+                target: TextObjectTarget::Word { big: false },
+                count: 1,
+            },
+        );
+    }
+
+    #[test]
+    fn change_around_quote() {
+        let mut m = VimMachine::new();
+        m.feed(key('c'));
+        m.feed(key('a'));
+        assert_eq!(
+            m.feed(key('"')),
+            Action::OperatorTextObject {
+                operator: Operator::Change,
+                around: true,
+                target: TextObjectTarget::Quote('"'),
+                count: 1,
+            },
+        );
+    }
+
+    #[test]
+    fn count_before_operator_textobject() {
+        let mut m = VimMachine::new();
+        m.feed(key('2'));
+        m.feed(key('d'));
+        m.feed(key('i'));
+        assert_eq!(
+            m.feed(key('w')),
+            Action::OperatorTextObject {
+                operator: Operator::Delete,
+                around: false,
+                target: TextObjectTarget::Word { big: false },
+                count: 2,
+            },
+        );
+    }
+
+    #[test]
+    fn count_after_operator_textobject() {
+        let mut m = VimMachine::new();
+        m.feed(key('d'));
+        m.feed(key('2'));
+        m.feed(key('a'));
+        assert_eq!(
+            m.feed(key('(')),
+            Action::OperatorTextObject {
+                operator: Operator::Delete,
+                around: true,
+                target: TextObjectTarget::Pair { open: '(', close: ')' },
+                count: 2,
+            },
+        );
+    }
+
+    #[test]
+    fn lowercase_inner_word() {
+        let mut m = VimMachine::new();
+        m.feed(key('g'));
+        m.feed(key('u'));
+        m.feed(key('i'));
+        assert_eq!(
+            m.feed(key('w')),
+            Action::OperatorTextObject {
+                operator: Operator::Lowercase,
+                around: false,
+                target: TextObjectTarget::Word { big: false },
+                count: 1,
+            },
+        );
+    }
+
+    #[test]
+    fn unknown_textobject_resets() {
+        let mut m = VimMachine::new();
+        m.feed(key('d'));
+        m.feed(key('i'));
+        assert_eq!(m.feed(key('z')), Action::None);
+        assert_eq!(m.feed(key('j')), Action::Move(Motion::Down, 1));
+    }
+
+    // ── Visual mode entry ─────────────────────────
+
+    #[test]
+    fn enter_visual_char() {
+        let mut m = VimMachine::new();
+        assert_eq!(m.feed(key('v')), Action::EnterVisual(VisualKind::Char),);
+    }
+
+    #[test]
+    fn enter_visual_line() {
+        let mut m = VimMachine::new();
+        assert_eq!(m.feed(key('V')), Action::EnterVisual(VisualKind::Line),);
+    }
+
+    // ── Visual mode grammar ───────────────────────
+
+    #[test]
+    fn visual_motion() {
+        let mut m = VimMachine::new();
+        assert_eq!(
+            m.feed_visual(key('w')),
+            Action::Move(Motion::WordStart, 1),
+        );
+    }
+
+    #[test]
+    fn visual_count_motion() {
+        let mut m = VimMachine::new();
+        m.feed_visual(key('2'));
+        assert_eq!(m.feed_visual(key('j')), Action::Move(Motion::Down, 2));
+    }
+
+    #[test]
+    fn visual_delete() {
+        let mut m = VimMachine::new();
+        assert_eq!(
+            m.feed_visual(key('d')),
+            Action::VisualOperator(Operator::Delete),
+        );
+    }
+
+    #[test]
+    fn visual_x_is_delete() {
+        let mut m = VimMachine::new();
+        assert_eq!(
+            m.feed_visual(key('x')),
+            Action::VisualOperator(Operator::Delete),
+        );
+    }
+
+    #[test]
+    fn visual_u_is_lowercase() {
+        let mut m = VimMachine::new();
+        assert_eq!(
+            m.feed_visual(key('u')),
+            Action::VisualOperator(Operator::Lowercase),
+        );
+    }
+
+    #[test]
+    fn visual_g_upper_u() {
+        let mut m = VimMachine::new();
+        m.feed_visual(key('g'));
+        assert_eq!(
+            m.feed_visual(key('U')),
+            Action::VisualOperator(Operator::Uppercase),
+        );
+    }
+
+    #[test]
+    fn visual_textobject() {
+        let mut m = VimMachine::new();
+        m.feed_visual(key('i'));
+        assert_eq!(
+            m.feed_visual(key('w')),
+            Action::VisualTextObject {
+                around: false,
+                target: TextObjectTarget::Word { big: false },
+                count: 1,
+            },
+        );
+    }
+
+    #[test]
+    fn visual_swap_anchor() {
+        let mut m = VimMachine::new();
+        assert_eq!(m.feed_visual(key('o')), Action::SwapAnchor);
+    }
+
+    #[test]
+    fn visual_find_char() {
+        let mut m = VimMachine::new();
+        m.feed_visual(key('f'));
+        assert_eq!(
+            m.feed_visual(key('x')),
+            Action::Move(Motion::FindChar('x'), 1),
+        );
+    }
+
+    #[test]
+    fn visual_gg() {
+        let mut m = VimMachine::new();
+        m.feed_visual(key('g'));
+        assert_eq!(m.feed_visual(key('g')), Action::Move(Motion::GotoTop, 1),);
+    }
+
+    #[test]
+    fn visual_esc_exits() {
+        let mut m = VimMachine::new();
+        assert_eq!(m.feed_visual(esc()), Action::ExitVisual);
+    }
+
+    #[test]
+    fn visual_esc_cancels_pending_first() {
+        let mut m = VimMachine::new();
+        m.feed_visual(key('i'));
+        // Esc cancels the pending text object...
+        assert_eq!(m.feed_visual(esc()), Action::None);
+        // ...the next Esc exits visual mode.
+        assert_eq!(m.feed_visual(esc()), Action::ExitVisual);
+    }
+
+    #[test]
+    fn visual_toggle_kind() {
+        let mut m = VimMachine::new();
+        assert_eq!(
+            m.feed_visual(key('V')),
+            Action::EnterVisual(VisualKind::Line),
         );
     }
 }

@@ -73,6 +73,18 @@ impl Buffer {
         }
     }
 
+    /// Merge a style over `width` cells starting at
+    /// (x, y). Non-`None` fields of `style` override
+    /// the existing cell style (used for selection
+    /// highlighting overlays).
+    pub fn set_style(&mut self, x: u16, y: u16, width: u16, style: Style) {
+        for dx in 0..width {
+            if let Some(cell) = self.cell_mut(x.saturating_add(dx), y) {
+                cell.style = cell.style.merge(style);
+            }
+        }
+    }
+
     pub fn clear(&mut self) {
         for cell in &mut self.cells {
             cell.symbol.clear();

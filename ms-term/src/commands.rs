@@ -1,14 +1,15 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use ms_core::movement;
+use ms_core::textobject;
 use ms_core::transaction::Transaction;
 use ms_tui::buffer::Rect;
 use ms_view::command::{
     Action, InsertVariant, KeyCode as VKeyCode, KeyInput, Motion, MotionType,
-    Operator, SpecialCommand,
+    Operator, SpecialCommand, TextObjectTarget,
 };
 use ms_view::editor::Editor;
-use ms_view::mode::Mode;
+use ms_view::mode::{Mode, VisualKind};
 use ms_view::theme::builtin_theme;
 
 pub(crate) fn build_status_line(editor: &Editor, area: Rect) -> String {
@@ -63,12 +64,19 @@ pub(crate) fn handle_key(editor: &mut Editor, key: KeyEvent) {
         Mode::Normal => handle_normal(editor, key),
         Mode::Insert => handle_insert(editor, key),
         Mode::Command => handle_command(editor, key),
+        Mode::Visual { .. } => handle_visual(editor, key),
     }
 }
 
 pub(crate) fn handle_normal(editor: &mut Editor, key: KeyEvent) {
     let input = to_key_input(key);
     let action = editor.vim.feed(input);
+    execute_action(editor, action);
+}
+
+pub(crate) fn handle_visual(editor: &mut Editor, key: KeyEvent) {
+    let input = to_key_input(key);
+    let action = editor.vim.feed_visual(input);
     execute_action(editor, action);
 }
 
@@ -243,8 +251,252 @@ pub(crate) fn execute_action(editor: &mut Editor, action: Action) {
         Action::Special(cmd, count) => {
             execute_special(editor, cmd, count);
         }
+        Action::EnterVisual(kind) => {
+            enter_visual(editor, kind);
+        }
+        Action::ExitVisual => {
+            editor.enter_normal();
+        }
+        Action::SwapAnchor => {
+            swap_visual_anchor(editor);
+        }
+        Action::VisualOperator(operator) => {
+            visual_operator(editor, operator);
+        }
+        Action::OperatorTextObject { operator, around, target, count } => {
+            operator_textobject(editor, operator, around, target, count);
+        }
+        Action::VisualTextObject { around, target, count } => {
+            select_textobject(editor, around, target, count);
+        }
         Action::None => {}
     }
+}
+
+// ── Visual mode ───────────────────────────────────
+
+/// Enter visual mode, or toggle/switch the kind when
+/// already in visual mode (vim `v`/`V`).
+pub(crate) fn enter_visual(editor: &mut Editor, kind: VisualKind) {
+    if let Mode::Visual { kind: current, anchor } = editor.mode {
+        if current == kind {
+            editor.enter_normal();
+        } else {
+            editor.mode = Mode::Visual { kind, anchor };
+        }
+    } else {
+        let anchor = cursor_pos(editor);
+        editor.mode = Mode::Visual { kind, anchor };
+    }
+}
+
+/// Swap anchor and cursor (vim `o`).
+pub(crate) fn swap_visual_anchor(editor: &mut Editor) {
+    if let Mode::Visual { kind, anchor } = editor.mode {
+        let head = cursor_pos(editor);
+        editor.mode = Mode::Visual { kind, anchor: head };
+        set_cursor_from_pos(editor, anchor);
+        editor.view.desired_col = editor.view.cursor_col;
+    }
+}
+
+/// Char range covered by the visual selection.
+/// Charwise is head-inclusive (vim semantics);
+/// linewise expands to whole lines.
+pub(crate) fn visual_range(
+    editor: &Editor,
+    kind: VisualKind,
+    anchor: usize,
+) -> (usize, usize, MotionType) {
+    let head = cursor_pos(editor);
+    let (lo, hi) =
+        if anchor <= head { (anchor, head) } else { (head, anchor) };
+
+    match kind {
+        VisualKind::Char | VisualKind::Block => {
+            let end = (hi + 1).min(editor.document.text.len_chars());
+            (lo, end, MotionType::Charwise)
+        }
+        VisualKind::Line => {
+            let start_line = editor.document.text.char_to_line(lo);
+            let end_line = editor.document.text.char_to_line(hi);
+            let start = editor.document.text.line_to_char(start_line);
+            let end = if end_line + 1 < editor.document.text.len_lines() {
+                editor.document.text.line_to_char(end_line + 1)
+            } else {
+                editor.document.text.len_chars()
+            };
+            (start, end, MotionType::Linewise)
+        }
+    }
+}
+
+/// Apply an operator to the visual selection and
+/// return to normal mode (or insert for change).
+pub(crate) fn visual_operator(editor: &mut Editor, operator: Operator) {
+    let Mode::Visual { kind, anchor } = editor.mode else {
+        return;
+    };
+    let (start, end, mt) = visual_range(editor, kind, anchor);
+    editor.mode = Mode::Normal;
+
+    if operator == Operator::Change && mt == MotionType::Linewise {
+        // Linewise change keeps an empty line open,
+        // like `cc` (vim `Vc`).
+        let start_line = editor.document.text.char_to_line(start);
+        let end_line = editor
+            .document
+            .text
+            .char_to_line(end.saturating_sub(1).max(start));
+        set_cursor_from_pos(editor, start);
+        change_lines(editor, end_line - start_line + 1);
+        return;
+    }
+
+    match operator {
+        Operator::Yank
+        | Operator::Lowercase
+        | Operator::Uppercase
+        | Operator::ToggleCase
+        | Operator::Indent
+        | Operator::Dedent => {
+            // Vim leaves the cursor at selection start.
+            set_cursor_from_pos(editor, start);
+        }
+        Operator::Delete | Operator::Change => {}
+    }
+    apply_operator(editor, operator, start, end, mt);
+    editor.clamp_cursor_col();
+}
+
+/// Resolve a text object at the cursor to a char
+/// range. Paragraphs are linewise, everything else
+/// charwise.
+pub(crate) fn textobject_range(
+    editor: &Editor,
+    target: TextObjectTarget,
+    around: bool,
+    count: usize,
+) -> Option<(usize, usize, MotionType)> {
+    let text = &editor.document.text;
+    let pos = cursor_pos(editor);
+    let (start, end) = match target {
+        TextObjectTarget::Word { big } => {
+            textobject::word(text, pos, count, big, around)?
+        }
+        TextObjectTarget::Paragraph => {
+            textobject::paragraph(text, pos, count, around)?
+        }
+        TextObjectTarget::Quote(c) => textobject::quote(text, pos, c, around)?,
+        TextObjectTarget::Pair { open, close } => {
+            textobject::pair(text, pos, open, close, count, around)?
+        }
+    };
+    let mt = if matches!(target, TextObjectTarget::Paragraph) {
+        MotionType::Linewise
+    } else {
+        MotionType::Charwise
+    };
+    Some((start, end, mt))
+}
+
+/// Operator + text object from normal mode (`diw`).
+pub(crate) fn operator_textobject(
+    editor: &mut Editor,
+    operator: Operator,
+    around: bool,
+    target: TextObjectTarget,
+    count: usize,
+) {
+    let Some((start, end, mt)) =
+        textobject_range(editor, target, around, count)
+    else {
+        return;
+    };
+    if start >= end {
+        // Empty inner object (`ci(` on `()`): change
+        // still enters insert at the gap.
+        if operator == Operator::Change {
+            set_insert_at(editor, start);
+        }
+        return;
+    }
+    if operator == Operator::Change && mt == MotionType::Linewise {
+        // Linewise change keeps an empty line open,
+        // like `cc` (vim `cip`).
+        let start_line = editor.document.text.char_to_line(start);
+        let end_line = editor
+            .document
+            .text
+            .char_to_line(end.saturating_sub(1).max(start));
+        set_cursor_from_pos(editor, start);
+        change_lines(editor, end_line - start_line + 1);
+        return;
+    }
+    apply_operator(editor, operator, start, end, mt);
+}
+
+/// Select a text object in visual mode (`viw`).
+pub(crate) fn select_textobject(
+    editor: &mut Editor,
+    around: bool,
+    target: TextObjectTarget,
+    count: usize,
+) {
+    let Mode::Visual { kind, .. } = editor.mode else {
+        return;
+    };
+    let Some((start, end, _mt)) =
+        textobject_range(editor, target, around, count)
+    else {
+        return;
+    };
+    if start >= end {
+        return;
+    }
+    editor.mode = Mode::Visual { kind, anchor: start };
+    set_cursor_from_pos(editor, end - 1);
+    editor.view.desired_col = editor.view.cursor_col;
+}
+
+/// Replace the visual selection with register
+/// contents (vim visual `p`).
+pub(crate) fn paste_over_selection(editor: &mut Editor) {
+    let Mode::Visual { kind, anchor } = editor.mode else {
+        return;
+    };
+    let reg = editor.yank_register;
+    let Some(new_text) = editor.registers.read(reg).map(ToString::to_string)
+    else {
+        editor.enter_normal();
+        return;
+    };
+    let (start, end, _mt) = visual_range(editor, kind, anchor);
+    editor.mode = Mode::Normal;
+
+    let replaced: String =
+        editor.document.text.slice(start..end).chars().collect();
+    let txn = Transaction::replace(start, end - start, &new_text);
+    let inv = txn.invert(&editor.document.text);
+    if editor.document.apply_transaction(&txn).is_ok() {
+        editor.history.commit(txn, inv);
+        // Replaced text goes to the unnamed register.
+        editor.registers.write('"', replaced);
+        let last = start + new_text.chars().count();
+        set_cursor_from_pos(editor, last.saturating_sub(1).max(start));
+        editor.clamp_cursor_col();
+    }
+}
+
+/// Enter insert mode with the cursor at an exact char
+/// position (may be one past line end).
+fn set_insert_at(editor: &mut Editor, pos: usize) {
+    editor.mode = Mode::Insert;
+    let pos = pos.min(editor.document.text.len_chars());
+    let (line, col) = editor.document.char_to_line_col(pos);
+    editor.view.cursor_line = line;
+    editor.view.set_col(col);
+    editor.view.ensure_cursor_visible();
 }
 
 // ── Motion execution ──────────────────────────────
@@ -520,8 +772,13 @@ pub(crate) fn apply_operator(
     if start >= end {
         return;
     }
-    let text: String =
+    let mut text: String =
         editor.document.text.slice(start..end).chars().collect();
+    // Linewise yanks always paste as whole lines, even
+    // when the last line has no trailing newline.
+    if mt == MotionType::Linewise && !text.ends_with('\n') {
+        text.push('\n');
+    }
 
     match op {
         Operator::Delete => {
@@ -533,7 +790,10 @@ pub(crate) fn apply_operator(
             let reg = editor.yank_register;
             editor.registers.write(reg, text);
             apply_delete(editor, start, end, mt);
-            editor.mode = Mode::Insert;
+            // Insert exactly at the deletion point,
+            // which may be one past line end (`ciw` on
+            // the last word of a line).
+            set_insert_at(editor, start);
         }
         Operator::Yank => {
             let reg = editor.yank_register;
@@ -890,6 +1150,11 @@ pub(crate) fn execute_special(
         SpecialCommand::DedentLine => {
             let (start, end) = line_range(editor, count);
             apply_indent(editor, start, end, false);
+        }
+        SpecialCommand::Paste | SpecialCommand::PasteBefore
+            if editor.mode.is_visual() =>
+        {
+            paste_over_selection(editor);
         }
         SpecialCommand::Paste => {
             paste(editor, false, count);

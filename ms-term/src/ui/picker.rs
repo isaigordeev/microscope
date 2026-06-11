@@ -200,9 +200,9 @@ impl<T: Send + Sync + 'static> Component for Picker<T> {
         event: &Event,
         ctx: &mut Context,
     ) -> EventResult {
-       let Event::Key(key) = event else {
+        let Event::Key(key) = event else {
             return EventResult::Consumed(None);
-       };
+        };
 
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 

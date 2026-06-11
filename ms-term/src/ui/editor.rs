@@ -52,6 +52,11 @@ impl Component for EditorView {
                 commands::handle_command(ctx.editor, *key);
                 EventResult::Consumed(None)
             }
+            Mode::Visual { .. } => {
+                ctx.editor.status_message = None;
+                commands::handle_visual(ctx.editor, *key);
+                EventResult::Consumed(None)
+            }
         }
     }
 
@@ -88,6 +93,18 @@ impl Component for EditorView {
             }
         }
 
+        // ── Selection highlight ──
+        if let Mode::Visual { kind, anchor } = ctx.editor.mode {
+            render_selection(
+                area,
+                surface,
+                ctx.editor,
+                kind,
+                anchor,
+                text_height,
+            );
+        }
+
         // ── Status bar ──
         let status_row = area.height - 1;
         let status_text = commands::build_status_line(ctx.editor, area);
@@ -102,10 +119,61 @@ impl Component for EditorView {
         let col = GUTTER_WIDTH + editor.view.cursor_col as u16;
         let row = editor.view.cursor_screen_row();
         let kind = match editor.mode {
-            Mode::Normal => CursorKind::Block,
+            Mode::Normal | Mode::Visual { .. } => CursorKind::Block,
             Mode::Insert | Mode::Command => CursorKind::Bar,
         };
         (Some(Position { col, row }), kind)
+    }
+}
+
+/// Overlay the `ui.selection` background over the
+/// visually selected cells.
+fn render_selection(
+    area: Rect,
+    surface: &mut Buffer,
+    editor: &Editor,
+    kind: ms_view::mode::VisualKind,
+    anchor: usize,
+    text_height: u16,
+) {
+    let sel_style = editor.theme.resolve("ui.selection");
+    let (start, end, mt) = commands::visual_range(editor, kind, anchor);
+    let text = &editor.document.text;
+    let max_width = area.width.saturating_sub(GUTTER_WIDTH);
+
+    for row in 0..text_height {
+        let doc_line = editor.view.scroll_offset + row as usize;
+        if editor.document.line(doc_line).is_none() {
+            break;
+        }
+        let line_start = text.line_to_char(doc_line);
+        let line_len = editor.document.line_len(doc_line);
+        let line_end = line_start + line_len;
+        if end <= line_start || start > line_end {
+            continue;
+        }
+
+        let (from, to) = match mt {
+            ms_view::command::MotionType::Linewise => (0, line_len.max(1)),
+            ms_view::command::MotionType::Charwise => {
+                let from = start.max(line_start) - line_start;
+                // When the selection continues past
+                // this line, include one cell for the
+                // newline (like vim).
+                let to = if end > line_end {
+                    line_len + 1
+                } else {
+                    end - line_start
+                };
+                (from, to.max(from + 1))
+            }
+        };
+
+        let width =
+            u16::try_from(to - from).unwrap_or(u16::MAX).min(max_width);
+        let x = GUTTER_WIDTH
+            .saturating_add(u16::try_from(from).unwrap_or(u16::MAX));
+        surface.set_style(x, row, width, sel_style);
     }
 }
 

@@ -3,4 +3,5 @@ pub mod movement;
 pub mod rope;
 pub mod selection;
 pub mod test;
+pub mod textobject;
 pub mod transaction;

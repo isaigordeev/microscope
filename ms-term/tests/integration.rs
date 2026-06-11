@@ -387,3 +387,172 @@ fn theme_no_arg_shows_current() {
         .unwrap()
         .starts_with("Current theme:"));
 }
+
+// ── Text objects (verified against nvim -u NONE) ──
+
+#[test]
+fn delete_inner_word() {
+    test(("foo b#[|]#ar baz", "diw", "foo #[|]# baz"));
+}
+
+#[test]
+fn delete_around_word() {
+    test(("foo b#[|]#ar baz", "daw", "foo #[|]#baz"));
+}
+
+#[test]
+fn delete_around_word_takes_leading_ws_at_eol() {
+    test(("foo b#[|]#ar", "daw", "fo#[|]#o"));
+}
+
+#[test]
+fn delete_inner_word_on_whitespace() {
+    test(("foo #[|]#  bar", "diw", "foo#[|]#bar"));
+}
+
+#[test]
+fn change_inner_word() {
+    test(("foo b#[|]#ar baz", "ciwXY<esc>", "foo XY#[|]# baz"));
+}
+
+#[test]
+fn change_inner_quote() {
+    test(("say \"he#[|]#llo\" now", "ci\"XY<esc>", "say \"XY#[|]#\" now"));
+}
+
+#[test]
+fn delete_inner_quote_cursor_on_open() {
+    test(("say #[|]#\"hello\" now", "di\"", "say \"#[|]#\" now"));
+}
+
+#[test]
+fn delete_around_quote() {
+    test(("say \"he#[|]#llo\" now", "da\"", "say #[|]#now"));
+}
+
+#[test]
+fn delete_inner_paren() {
+    test(("a(b#[|]#c)d", "di(", "a(#[|]#)d"));
+}
+
+#[test]
+fn delete_around_paren() {
+    test(("a(b#[|]#c)d", "da(", "a#[|]#d"));
+}
+
+#[test]
+fn delete_inner_brace_count_two() {
+    test(("{a{#[|]#b}c}", "2di{", "{#[|]#}"));
+}
+
+#[test]
+fn delete_inner_paren_unmatched_noop() {
+    test(("(ab#[|]#c", "di(", "(ab#[|]#c"));
+}
+
+#[test]
+fn change_inner_paren_empty_enters_insert() {
+    test(("a(#[|]#)b", "ci(X<esc>", "a(X#[|]#)b"));
+}
+
+#[test]
+fn delete_inner_paragraph_is_linewise() {
+    test(("a#[|]#aa\nbbb\n\nccc", "dip", "#[|]#\nccc"));
+}
+
+#[test]
+fn delete_around_paragraph() {
+    test(("aa#[|]#a\n\nbbb\n\nccc", "dap", "#[|]#bbb\n\nccc"));
+}
+
+// ── Visual mode (verified against nvim -u NONE) ───
+
+#[test]
+fn visual_charwise_delete_is_inclusive() {
+    test(("#[|]#hello", "vlld", "#[|]#lo"));
+}
+
+#[test]
+fn visual_inner_word_delete() {
+    test(("foo b#[|]#ar baz", "viwd", "foo #[|]# baz"));
+}
+
+#[test]
+fn visual_count_inner_word_delete() {
+    test(("#[|]#foo bar baz", "v2iwd", "#[|]#bar baz"));
+}
+
+#[test]
+fn visual_line_delete_two_lines() {
+    test(("a#[|]#bc\ndef\nghi", "Vjd", "#[|]#ghi"));
+}
+
+#[test]
+fn visual_line_delete_single() {
+    test(("a#[|]#bc\ndef", "Vd", "#[|]#def"));
+}
+
+#[test]
+fn visual_line_yank_paste() {
+    // pasting linewise after the last line adds the
+    // missing trailing newline first (vim file model)
+    test(("a#[|]#bc\ndef", "Vyjp", "abc\ndef\n#[|]#abc\n"));
+}
+
+#[test]
+fn visual_yank_moves_cursor_to_start() {
+    test(("he#[|]#llo", "vhhy", "#[|]#hello"));
+}
+
+#[test]
+fn visual_change_selection() {
+    test(("#[|]#hello world", "vlsXY<esc>", "XY#[|]#llo world"));
+}
+
+#[test]
+fn visual_uppercase() {
+    test(("#[|]#hello", "vlU", "#[|]#HEllo"));
+}
+
+#[test]
+fn visual_g_uppercase() {
+    test(("#[|]#hello", "vlgU", "#[|]#HEllo"));
+}
+
+#[test]
+fn visual_swap_anchor_extends_back() {
+    test(("a#[|]#bcde", "vllohd", "#[|]#e"));
+}
+
+#[test]
+fn visual_esc_keeps_cursor() {
+    test(("#[|]#abc", "vll<esc>x", "a#[|]#b"));
+}
+
+#[test]
+fn visual_v_toggles_back_to_normal() {
+    test(("#[|]#abc", "vlvx", "a#[|]#c"));
+}
+
+#[test]
+fn visual_paste_over_selection() {
+    test(("a#[|]#bc", "ylvlp", "a#[|]#b"));
+}
+
+#[test]
+fn visual_inner_paragraph_delete() {
+    test(("a#[|]#aa\nbbb\n\nccc", "vipd", "#[|]#\nccc"));
+}
+
+#[test]
+fn visual_mode_indicator() {
+    let mut editor = test_editor("#[|]#hello");
+    for key in parse_keys("v") {
+        ms_term::application::handle_key(&mut editor, key);
+    }
+    assert_eq!(editor.mode.display_name(), "VISUAL");
+    for key in parse_keys("V") {
+        ms_term::application::handle_key(&mut editor, key);
+    }
+    assert_eq!(editor.mode.display_name(), "VISUAL LINE");
+}

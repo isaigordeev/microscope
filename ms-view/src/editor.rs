@@ -66,9 +66,9 @@ impl Editor {
     pub fn clamp_cursor_col(&mut self) {
         let line_len = self.current_line_len();
         let max_col = match self.mode {
-            // Normal mode: cursor is ON a char, can't go
-            // past last char.
-            Mode::Normal => {
+            // Normal/Visual: cursor is ON a char, can't
+            // go past last char.
+            Mode::Normal | Mode::Visual { .. } => {
                 if line_len == 0 {
                     0
                 } else {
