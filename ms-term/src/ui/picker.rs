@@ -12,8 +12,8 @@ use crate::compositor::{
     Callback, Component, Context, CursorKind, EventResult, Position,
 };
 
-/// Minimum terminal width to show the preview panel.
-const MIN_PREVIEW_WIDTH: u16 = 72;
+/// Minimum picker width to show the preview panel.
+const MIN_PREVIEW_WIDTH: u16 = 50;
 
 /// Maximum lines to load for file preview.
 const MAX_PREVIEW_LINES: usize = 100;
@@ -185,13 +185,13 @@ impl<T: Send + Sync + 'static> Picker<T> {
     }
 }
 
-/// Picker area within the terminal.
+/// Picker area: roughly half the terminal, centered.
 fn picker_area(terminal: Rect) -> Rect {
-    let margin_x = 2;
-    let margin_y = 1;
-    let w = terminal.width.saturating_sub(margin_x * 2).max(10);
-    let h = terminal.height.saturating_sub(margin_y * 2).max(5);
-    Rect::new(margin_x, margin_y, w, h)
+    let w = (terminal.width).max(50).min(terminal.width);
+    let h = (terminal.height / 2).max(10).min(terminal.height);
+    let x = terminal.width.saturating_sub(w) / 2;
+    let y = terminal.height.saturating_sub(h) / 2;
+    Rect::new(x, y, w, h)
 }
 
 impl<T: Send + Sync + 'static> Component for Picker<T> {
@@ -200,9 +200,9 @@ impl<T: Send + Sync + 'static> Component for Picker<T> {
         event: &Event,
         ctx: &mut Context,
     ) -> EventResult {
-        let Event::Key(key) = event else {
+       let Event::Key(key) = event else {
             return EventResult::Consumed(None);
-        };
+       };
 
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
@@ -220,15 +220,19 @@ impl<T: Send + Sync + 'static> Component for Picker<T> {
                 let cb: Callback = Box::new(pop_picker);
                 EventResult::Consumed(Some(cb))
             }
-            KeyCode::Up | KeyCode::BackTab | KeyCode::Char('p')
-                if key.code != KeyCode::Char('p') || ctrl =>
-            {
+            KeyCode::Char('p') if ctrl => {
+                self.move_down();
+                EventResult::Consumed(None)
+            }
+            KeyCode::Char('n') if ctrl => {
                 self.move_up();
                 EventResult::Consumed(None)
             }
-            KeyCode::Down | KeyCode::Tab | KeyCode::Char('n')
-                if key.code != KeyCode::Char('n') || ctrl =>
-            {
+            KeyCode::Up | KeyCode::BackTab => {
+                self.move_up();
+                EventResult::Consumed(None)
+            }
+            KeyCode::Down | KeyCode::Tab => {
                 self.move_down();
                 EventResult::Consumed(None)
             }
@@ -346,8 +350,7 @@ impl<T: Send + Sync + 'static> Component for Picker<T> {
         for x in inner.x..inner.x + list_width {
             set_symbol(surface, x, count_y, " ", popup_style);
         }
-        let count_text =
-            format!("  {}/{} (0)", total, snapshot.item_count());
+        let count_text = format!("  {}/{} (0)", total, snapshot.item_count());
         let max_count = list_width.saturating_sub(1) as usize;
         let count_truncated: String =
             count_text.chars().take(max_count).collect();
@@ -357,8 +360,7 @@ impl<T: Send + Sync + 'static> Component for Picker<T> {
         for x in inner.x..inner.x + list_width {
             set_symbol(surface, x, prompt_y, " ", popup_style);
         }
-        let prompt_text =
-            format!("  {}{}", self.prompt_prefix, self.query);
+        let prompt_text = format!("  {}{}", self.prompt_prefix, self.query);
         let max_prompt = list_width.saturating_sub(1) as usize;
         let prompt_truncated: String =
             prompt_text.chars().take(max_prompt).collect();
