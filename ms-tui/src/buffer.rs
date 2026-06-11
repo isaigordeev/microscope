@@ -105,3 +105,41 @@ impl Buffer {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::style::Color;
+
+    #[test]
+    fn set_style_merges_bg_keeps_fg() {
+        let mut buf = Buffer::new(Rect::new(0, 0, 10, 2));
+        let fg = Style::default().fg(Color::Rgb(1, 2, 3));
+        buf.put_str(0, 0, "hello", fg);
+
+        let bg = Style::default().bg(Color::Rgb(9, 9, 9));
+        buf.set_style(1, 0, 3, bg);
+
+        let cell = buf.cell_mut(2, 0).map(|c| c.style);
+        assert_eq!(
+            cell,
+            Some(
+                Style::default()
+                    .fg(Color::Rgb(1, 2, 3))
+                    .bg(Color::Rgb(9, 9, 9))
+            ),
+        );
+        // Outside the span: untouched.
+        let outside = buf.cell_mut(4, 0).map(|c| c.style);
+        assert_eq!(outside, Some(fg));
+    }
+
+    #[test]
+    fn set_style_clips_to_area() {
+        let mut buf = Buffer::new(Rect::new(0, 0, 4, 1));
+        let bg = Style::default().bg(Color::Rgb(9, 9, 9));
+        // Width past the edge must not panic.
+        buf.set_style(2, 0, 100, bg);
+        assert_eq!(buf.cell_mut(3, 0).map(|c| c.style), Some(bg));
+    }
+}
