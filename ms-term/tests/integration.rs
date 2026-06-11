@@ -849,17 +849,17 @@ fn ex_edit_opens_file() {
 }
 
 #[test]
-fn ex_edit_refuses_unsaved_changes() {
+fn ex_edit_keeps_modified_buffer_in_background() {
+    // nvim 'hidden' default: :e away from a modified
+    // buffer keeps it open instead of refusing
     let mut editor = test_editor("#[|]#old");
     editor.document.modified = true;
     for key in parse_keys(":e somewhere.txt<ret>") {
         ms_term::application::handle_key(&mut editor, key);
     }
-    assert_eq!(editor_annotated(&editor), "#[|]#old");
-    assert!(editor
-        .status_message
-        .as_deref()
-        .is_some_and(|m| m.contains("No write since last change")));
+    assert_eq!(editor_annotated(&editor), "#[|]#");
+    assert_eq!(editor.buffer_count(), 2);
+    assert!(editor.any_modified());
 }
 
 // ── Config ────────────────────────────────────────
@@ -892,4 +892,109 @@ fn config_indent_width_drives_indent() {
 fn config_bad_toml_falls_back_to_defaults() {
     let result = ms_view::config::load_merged(Some("theme = "), None);
     assert!(result.is_err());
+}
+
+// ── Multi-buffer ──────────────────────────────────
+
+fn two_temp_files() -> (tempfile::TempDir, String, String) {
+    use std::io::Write as _;
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+    let p1 = dir.path().join("alpha.txt");
+    let p2 = dir.path().join("beta.txt");
+    let mut f1 =
+        std::fs::File::create(&p1).unwrap_or_else(|e| panic!("create: {e}"));
+    write!(f1, "alpha content").unwrap_or_else(|e| panic!("write: {e}"));
+    let mut f2 =
+        std::fs::File::create(&p2).unwrap_or_else(|e| panic!("create: {e}"));
+    write!(f2, "beta content").unwrap_or_else(|e| panic!("write: {e}"));
+    (dir, p1.display().to_string(), p2.display().to_string())
+}
+
+fn send(editor: &mut ms_view::editor::Editor, keys: &str) {
+    for key in parse_keys(keys) {
+        ms_term::application::handle_key(editor, key);
+    }
+}
+
+#[test]
+fn edit_keeps_buffers_and_bp_returns() {
+    let (_dir, p1, p2) = two_temp_files();
+    let mut editor = test_editor("#[|]#");
+    send(&mut editor, &format!(":e {p1}<ret>"));
+    send(&mut editor, &format!(":e {p2}<ret>"));
+    assert_eq!(editor.buffer_count(), 2);
+    assert_eq!(editor.document.text.to_string(), "beta content");
+    send(&mut editor, ":bp<ret>");
+    assert_eq!(editor.document.text.to_string(), "alpha content");
+    send(&mut editor, ":bn<ret>");
+    assert_eq!(editor.document.text.to_string(), "beta content");
+}
+
+#[test]
+fn buffer_switch_restores_cursor() {
+    let (_dir, p1, p2) = two_temp_files();
+    let mut editor = test_editor("#[|]#");
+    send(&mut editor, &format!(":e {p1}<ret>"));
+    send(&mut editor, "ll");
+    send(&mut editor, &format!(":e {p2}<ret>"));
+    assert_eq!(editor.view.cursor_col, 0);
+    send(&mut editor, ":b 1<ret>");
+    assert_eq!(editor.view.cursor_col, 2);
+}
+
+#[test]
+fn undo_history_is_per_buffer() {
+    let (_dir, p1, p2) = two_temp_files();
+    let mut editor = test_editor("#[|]#");
+    send(&mut editor, &format!(":e {p1}<ret>"));
+    send(&mut editor, "x");
+    assert_eq!(editor.document.text.to_string(), "lpha content");
+    send(&mut editor, &format!(":e {p2}<ret>"));
+    send(&mut editor, "x");
+    assert_eq!(editor.document.text.to_string(), "eta content");
+    // u in buffer 2 undoes only buffer 2's edit
+    send(&mut editor, "u");
+    assert_eq!(editor.document.text.to_string(), "beta content");
+    // back in buffer 1, u undoes buffer 1's edit
+    send(&mut editor, ":b alpha<ret>");
+    assert_eq!(editor.document.text.to_string(), "lpha content");
+    send(&mut editor, "u");
+    assert_eq!(editor.document.text.to_string(), "alpha content");
+}
+
+#[test]
+fn switch_away_from_modified_buffer_is_allowed() {
+    let (_dir, p1, p2) = two_temp_files();
+    let mut editor = test_editor("#[|]#");
+    send(&mut editor, &format!(":e {p1}<ret>"));
+    send(&mut editor, "x");
+    send(&mut editor, &format!(":e {p2}<ret>"));
+    assert_eq!(editor.document.text.to_string(), "beta content");
+    assert!(editor.any_modified());
+    // :q refuses while a background buffer is modified
+    send(&mut editor, ":q<ret>");
+    assert!(!editor.should_quit);
+}
+
+#[test]
+fn bd_closes_and_returns_to_other_buffer() {
+    let (_dir, p1, p2) = two_temp_files();
+    let mut editor = test_editor("#[|]#");
+    send(&mut editor, &format!(":e {p1}<ret>"));
+    send(&mut editor, &format!(":e {p2}<ret>"));
+    send(&mut editor, ":bd<ret>");
+    assert_eq!(editor.buffer_count(), 1);
+    assert_eq!(editor.document.text.to_string(), "alpha content");
+}
+
+#[test]
+fn ls_lists_buffers() {
+    let (_dir, p1, p2) = two_temp_files();
+    let mut editor = test_editor("#[|]#");
+    send(&mut editor, &format!(":e {p1}<ret>"));
+    send(&mut editor, &format!(":e {p2}<ret>"));
+    send(&mut editor, ":ls<ret>");
+    let msg = editor.status_message.clone().unwrap_or_default();
+    assert!(msg.contains("1 \"alpha.txt\""), "msg: {msg}");
+    assert!(msg.contains("2% \"beta.txt\""), "msg: {msg}");
 }

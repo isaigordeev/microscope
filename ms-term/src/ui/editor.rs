@@ -272,6 +272,9 @@ impl EditorView {
             if key.code == KeyCode::Char('p') {
                 return self.open_file_picker();
             }
+            if key.code == KeyCode::Char('b') {
+                return Self::open_buffer_picker();
+            }
             // Unknown leader combo — feed Space then
             // this key to VimMachine.
             let space =
@@ -315,6 +318,15 @@ impl EditorView {
         ctx.editor.status_message = None;
         commands::execute_action(ctx.editor, action);
         EventResult::Consumed(None)
+    }
+
+    /// Push the buffer picker onto the compositor.
+    fn open_buffer_picker() -> EventResult {
+        let cb: Callback = Box::new(|compositor, ctx| {
+            let picker = crate::ui::buffer_picker::buffer_picker(ctx.editor);
+            compositor.push(Box::new(picker));
+        });
+        EventResult::Consumed(Some(cb))
     }
 
     /// Push the file picker onto the compositor.

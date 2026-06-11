@@ -1,9 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use ignore::WalkBuilder;
-use ms_core::history::History;
 use ms_view::document::Document;
-use ms_view::view::View;
 
 use crate::compositor::Context;
 
@@ -72,14 +70,12 @@ fn collect_files(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Open a file, replacing the current document.
+/// Open a file as a new buffer (reuses an existing
+/// one with the same path).
 fn open_file(ctx: &mut Context, path: &Path) {
     match Document::open(path) {
         Ok(doc) => {
-            let height = ctx.editor.view.height;
-            ctx.editor.document = doc;
-            ctx.editor.view = View::new(height);
-            ctx.editor.history = History::new();
+            ctx.editor.open_document(doc);
             ctx.editor.vim.reset();
             ctx.editor.status_message = None;
         }

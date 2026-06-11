@@ -58,6 +58,18 @@ pub enum ExCommand {
     /// toggle (`number!`).
     SetNumber(Option<bool>),
     Theme(Option<String>),
+    /// `:b name-or-number` — switch buffer.
+    Buffer(String),
+    /// `:bn` — next buffer.
+    BufferNext,
+    /// `:bp` — previous buffer.
+    BufferPrev,
+    /// `:bd` — close the current buffer.
+    BufferDelete {
+        force: bool,
+    },
+    /// `:ls` — list open buffers.
+    ListBuffers,
     /// `:config-reload` — re-read config files.
     ConfigReload,
     /// `:config-open` — edit the global config file.
@@ -118,6 +130,17 @@ pub fn parse(input: &str) -> ExCommand {
         }
         "set" | "se" => parse_set(arg, input),
         "theme" => ExCommand::Theme((!arg.is_empty()).then(|| arg.to_owned())),
+        "b" | "bu" | "buf" | "buffer" => {
+            if arg.is_empty() {
+                ExCommand::Unknown(input.to_owned())
+            } else {
+                ExCommand::Buffer(arg.to_owned())
+            }
+        }
+        "bn" | "bnext" => ExCommand::BufferNext,
+        "bp" | "bprev" | "bprevious" => ExCommand::BufferPrev,
+        "bd" | "bdelete" => ExCommand::BufferDelete { force },
+        "ls" | "buffers" => ExCommand::ListBuffers,
         "config-reload" => ExCommand::ConfigReload,
         "config-open" => ExCommand::ConfigOpen,
         _ => ExCommand::Unknown(input.to_owned()),
@@ -434,6 +457,18 @@ mod tests {
         assert_eq!(parse("set number"), ExCommand::SetNumber(Some(true)));
         assert_eq!(parse("set nonu"), ExCommand::SetNumber(Some(false)));
         assert_eq!(parse("set number!"), ExCommand::SetNumber(None));
+    }
+
+    #[test]
+    fn buffer_commands() {
+        assert_eq!(parse("b 2"), ExCommand::Buffer("2".to_owned()));
+        assert_eq!(parse("b2"), ExCommand::Buffer("2".to_owned()));
+        assert_eq!(parse("b main"), ExCommand::Buffer("main".to_owned()));
+        assert_eq!(parse("bn"), ExCommand::BufferNext);
+        assert_eq!(parse("bp"), ExCommand::BufferPrev);
+        assert_eq!(parse("bd"), ExCommand::BufferDelete { force: false });
+        assert_eq!(parse("bd!"), ExCommand::BufferDelete { force: true });
+        assert_eq!(parse("ls"), ExCommand::ListBuffers);
     }
 
     #[test]

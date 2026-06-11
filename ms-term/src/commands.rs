@@ -337,15 +337,7 @@ pub(crate) fn execute_command(editor: &mut Editor, cmd: &str) {
     match command_line::parse(cmd) {
         ExCommand::Empty => {}
         ExCommand::Quit { force } => {
-            if editor.document.modified && !force {
-                editor.status_message = Some(
-                    "No write since last change \
-                     (add ! to override)"
-                        .to_owned(),
-                );
-            } else {
-                editor.should_quit = true;
-            }
+            ex_quit(editor, force);
         }
         ExCommand::Write { path } => {
             ex_write(editor, path);
@@ -392,6 +384,23 @@ pub(crate) fn execute_command(editor: &mut Editor, cmd: &str) {
         ExCommand::Theme(name) => {
             ex_theme(editor, name);
         }
+        ExCommand::Buffer(arg) => {
+            ex_buffer(editor, &arg);
+        }
+        ExCommand::BufferNext => {
+            editor.next_buffer();
+        }
+        ExCommand::BufferPrev => {
+            editor.prev_buffer();
+        }
+        ExCommand::BufferDelete { force } => {
+            if let Err(e) = editor.close_buffer(force) {
+                editor.status_message = Some(e);
+            }
+        }
+        ExCommand::ListBuffers => {
+            editor.status_message = Some(list_buffers(editor));
+        }
         ExCommand::ConfigReload => {
             editor.status_message = crate::config_io::load_and_apply(editor)
                 .or_else(|| Some("Config reloaded".to_owned()));
@@ -415,6 +424,18 @@ pub(crate) fn execute_command(editor: &mut Editor, cmd: &str) {
 }
 
 // ── Ex command execution ──────────────────────────
+
+fn ex_quit(editor: &mut Editor, force: bool) {
+    if editor.any_modified() && !force {
+        editor.status_message = Some(
+            "No write since last change \
+             (add ! to override)"
+                .to_owned(),
+        );
+    } else {
+        editor.should_quit = true;
+    }
+}
 
 fn ex_write(editor: &mut Editor, path: Option<String>) {
     if let Some(path) = path {
@@ -594,15 +615,7 @@ fn ex_delete_lines(editor: &mut Editor, range: Option<ExRange>) {
     apply_delete(editor, start, end, MotionType::Linewise);
 }
 
-fn ex_edit(editor: &mut Editor, path: &str, force: bool) {
-    if editor.document.modified && !force {
-        editor.status_message = Some(
-            "No write since last change \
-             (add ! to override)"
-                .to_owned(),
-        );
-        return;
-    }
+fn ex_edit(editor: &mut Editor, path: &str, _force: bool) {
     let path_buf = std::path::PathBuf::from(path);
     let document = match ms_view::document::Document::open(&path_buf) {
         Ok(doc) => doc,
@@ -622,12 +635,58 @@ fn ex_edit(editor: &mut Editor, path: &str, force: bool) {
     if editor.status_message.is_none() {
         editor.status_message = Some(format!("\"{path}\" {lines} lines"));
     }
-    editor.document = document;
-    editor.history = ms_core::history::History::new();
-    editor.marks.clear();
-    editor.view.cursor_line = 0;
-    editor.view.set_col(0);
-    editor.view.scroll_offset = 0;
+    // Opens as a new buffer; modified buffers stay
+    // open in the background (nvim 'hidden' default).
+    editor.open_document(document);
+}
+
+/// `:b` — switch by 1-based number or path fragment.
+fn ex_buffer(editor: &mut Editor, arg: &str) {
+    if let Ok(n) = arg.parse::<usize>() {
+        if n >= 1 && editor.switch_buffer(n - 1) {
+            return;
+        }
+        editor.status_message = Some(format!("No buffer {n}"));
+        return;
+    }
+    let found = editor.buffer_infos().into_iter().find(|b| {
+        b.path.as_ref().is_some_and(|p| p.display().to_string().contains(arg))
+    });
+    match found {
+        Some(info) => {
+            editor.switch_buffer(info.index);
+        }
+        None => {
+            editor.status_message = Some(format!("No matching buffer: {arg}"));
+        }
+    }
+}
+
+fn list_buffers(editor: &Editor) -> String {
+    editor
+        .buffer_infos()
+        .iter()
+        .map(|b| {
+            let name = b.path.as_ref().map_or_else(
+                || "[scratch]".to_owned(),
+                |p| {
+                    p.file_name().map_or_else(
+                        || p.display().to_string(),
+                        |n| n.to_string_lossy().into_owned(),
+                    )
+                },
+            );
+            let mut tag = (b.index + 1).to_string();
+            if b.current {
+                tag.push('%');
+            }
+            if b.modified {
+                tag.push('+');
+            }
+            format!("{tag} \"{name}\"")
+        })
+        .collect::<Vec<_>>()
+        .join("  ")
 }
 
 // ── Action dispatch ───────────────────────────────
