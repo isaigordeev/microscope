@@ -224,6 +224,37 @@ the module is the "plugin".
 
 ---
 
+## Configuration
+
+Helix-style layered TOML (landed early, during M1 polish):
+
+```
+defaults  ←  ~/.config/microscope/config.toml  ←  .microscope.toml
+              (global, $XDG_CONFIG_HOME aware)     (project-local,
+                                                    found walking up
+                                                    from the cwd)
+```
+
+Files are merged at the TOML *value* level before typed
+deserialization (`ms-view/src/config.rs`), so a partial local config
+overrides individual keys only. Unknown keys are errors
+(`deny_unknown_fields`); a bad config falls back to defaults with a
+status message. File IO/path discovery: `ms-term/src/config_io.rs`.
+
+```toml
+# .microscope.toml / config.toml
+theme = "vs_dark"     # vs_dark | vs_light
+number = true         # gutter line numbers (:set number)
+scrolloff = 4         # lines kept around the cursor
+indent-width = 4      # >> / << shift width
+```
+
+`:config-reload` re-reads and applies at runtime; `:config-open`
+edits the global file. Future sections will follow Helix's shape:
+`[keys]` for the keymap trie (M2+), per-language settings (M3+).
+
+---
+
 ## Theme System
 
 Three sources of highlight information feed into the theme:

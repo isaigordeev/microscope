@@ -798,15 +798,15 @@ fn ex_visual_range_substitute() {
 #[test]
 fn ex_set_nonumber_toggles_flag() {
     let mut editor = test_editor("#[|]#a");
-    assert!(editor.show_numbers);
+    assert!(editor.config.number);
     for key in parse_keys(":set nonumber<ret>") {
         ms_term::application::handle_key(&mut editor, key);
     }
-    assert!(!editor.show_numbers);
+    assert!(!editor.config.number);
     for key in parse_keys(":set number!<ret>") {
         ms_term::application::handle_key(&mut editor, key);
     }
-    assert!(editor.show_numbers);
+    assert!(editor.config.number);
 }
 
 #[test]
@@ -860,4 +860,36 @@ fn ex_edit_refuses_unsaved_changes() {
         .status_message
         .as_deref()
         .is_some_and(|m| m.contains("No write since last change")));
+}
+
+// ── Config ────────────────────────────────────────
+
+#[test]
+fn config_apply_sets_theme_and_scrolloff() {
+    let mut editor = test_editor("#[|]#a");
+    let config = ms_view::config::load_merged(
+        Some("theme = \"vs_light\"\nscrolloff = 9"),
+        Some("number = false"),
+    )
+    .unwrap_or_default();
+    ms_term::config_io::apply(&mut editor, config);
+    assert_eq!(editor.theme.name, "vs_light");
+    assert_eq!(editor.view.scrolloff, 9);
+    assert!(!editor.config.number);
+}
+
+#[test]
+fn config_indent_width_drives_indent() {
+    let mut editor = test_editor("#[|]#hello");
+    editor.config.indent_width = 2;
+    for key in parse_keys(">>") {
+        ms_term::application::handle_key(&mut editor, key);
+    }
+    assert_eq!(editor_annotated(&editor), "  #[|]#hello");
+}
+
+#[test]
+fn config_bad_toml_falls_back_to_defaults() {
+    let result = ms_view::config::load_merged(Some("theme = "), None);
+    assert!(result.is_err());
 }

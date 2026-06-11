@@ -14,6 +14,9 @@ pub struct View {
     pub desired_col: usize,
     /// Number of visible rows in the viewport.
     pub height: u16,
+    /// Lines kept visible around the cursor when
+    /// scrolling (config `scrolloff`).
+    pub scrolloff: usize,
 }
 
 impl View {
@@ -24,13 +27,14 @@ impl View {
             cursor_col: 0,
             desired_col: 0,
             height,
+            scrolloff: 4,
         }
     }
 
     /// Scroll so that the cursor is visible, respecting
-    /// scrolloff (4 lines).
+    /// scrolloff (configurable, default 4 lines).
     pub const fn ensure_cursor_visible(&mut self) {
-        let scrolloff: usize = 4;
+        let scrolloff: usize = self.scrolloff;
         let h = self.height as usize;
 
         if h == 0 {

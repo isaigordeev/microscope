@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use ms_core::history::History;
 
 use crate::command::{Motion, VimMachine};
+use crate::config::Config;
 use crate::document::Document;
 use crate::mode::Mode;
 use crate::register::Registers;
@@ -54,8 +55,9 @@ pub struct Editor {
     pub marks: HashMap<char, usize>,
     /// Last `f`/`F`/`t`/`T` motion, for `;` and `,`.
     pub last_find: Option<Motion>,
-    /// Line numbers in the gutter (`:set number`).
-    pub show_numbers: bool,
+    /// Settings (config.toml / .microscope.toml /
+    /// `:set`).
+    pub config: Config,
     /// Executed `:` commands, oldest first.
     pub command_history: Vec<String>,
     /// Position while cycling history with Up/Down.
@@ -80,7 +82,7 @@ impl Editor {
             search_origin: 0,
             marks: HashMap::new(),
             last_find: None,
-            show_numbers: true,
+            config: Config::default(),
             command_history: Vec::new(),
             history_pos: None,
         }

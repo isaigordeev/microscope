@@ -19,7 +19,7 @@ const GUTTER_WIDTH: u16 = 6;
 /// Gutter width: 0 when line numbers are off
 /// (`:set nonumber`).
 const fn gutter_width(editor: &Editor) -> u16 {
-    if editor.show_numbers {
+    if editor.config.number {
         GUTTER_WIDTH
     } else {
         0

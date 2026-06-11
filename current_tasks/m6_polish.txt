@@ -13,7 +13,12 @@ Tasks:
 - [ ] Breadcrumbs (file path + symbol path at top)
 - [ ] Russian keyboard support (vim commands work in RU layout)
 - [ ] Session management (reopen files/cursor on restart)
-- [ ] Project-local config (.microscope.toml)
+- [x] Project-local config (.microscope.toml) — DONE early
+      (M1 polish): Helix-style layered TOML, global
+      ~/.config/microscope/config.toml + local .microscope.toml,
+      value-level merge, :config-reload / :config-open.
+      Settings so far: theme, number, scrolloff, indent-width.
+      See DESIGN_DOC "Configuration".
 - [ ] Zen UI refinements
       - No statusline by default (toggle)
       - Single-tab focus

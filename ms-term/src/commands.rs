@@ -348,22 +348,7 @@ pub(crate) fn execute_command(editor: &mut Editor, cmd: &str) {
             }
         }
         ExCommand::Write { path } => {
-            if let Some(path) = path {
-                editor.document.path = Some(path.into());
-            }
-            match editor.document.save() {
-                Ok(()) => {
-                    let name = editor.document.path.as_ref().map_or_else(
-                        || "[scratch]".to_owned(),
-                        |p| p.display().to_string(),
-                    );
-                    editor.status_message =
-                        Some(format!("\"{name}\" written"));
-                }
-                Err(e) => {
-                    editor.status_message = Some(format!("Error: {e}"));
-                }
-            }
+            ex_write(editor, path);
         }
         ExCommand::WriteQuit => {
             if let Err(e) = editor.document.save() {
@@ -402,23 +387,26 @@ pub(crate) fn execute_command(editor: &mut Editor, cmd: &str) {
             }
         }
         ExCommand::SetNumber(value) => {
-            editor.show_numbers = value.unwrap_or(!editor.show_numbers);
+            editor.config.number = value.unwrap_or(!editor.config.number);
         }
-        ExCommand::Theme(name) => match name {
-            None => {
-                editor.status_message =
-                    Some(format!("Current theme: {}", editor.theme.name,));
-            }
-            Some(name) => {
-                if let Some(theme) = builtin_theme(&name) {
-                    editor.status_message = Some(format!("Theme: {name}"));
-                    editor.theme = theme;
-                } else {
+        ExCommand::Theme(name) => {
+            ex_theme(editor, name);
+        }
+        ExCommand::ConfigReload => {
+            editor.status_message = crate::config_io::load_and_apply(editor)
+                .or_else(|| Some("Config reloaded".to_owned()));
+        }
+        ExCommand::ConfigOpen => {
+            match crate::config_io::global_config_path() {
+                Some(path) => {
+                    ex_edit(editor, &path.display().to_string(), false);
+                }
+                None => {
                     editor.status_message =
-                        Some(format!("Unknown theme: {name}"));
+                        Some("No config directory found".to_owned());
                 }
             }
-        },
+        }
         ExCommand::Unknown(cmd) => {
             editor.status_message =
                 Some(format!("Not an editor command: {cmd}"));
@@ -427,6 +415,41 @@ pub(crate) fn execute_command(editor: &mut Editor, cmd: &str) {
 }
 
 // ── Ex command execution ──────────────────────────
+
+fn ex_write(editor: &mut Editor, path: Option<String>) {
+    if let Some(path) = path {
+        editor.document.path = Some(path.into());
+    }
+    match editor.document.save() {
+        Ok(()) => {
+            let name = editor.document.path.as_ref().map_or_else(
+                || "[scratch]".to_owned(),
+                |p| p.display().to_string(),
+            );
+            editor.status_message = Some(format!("\"{name}\" written"));
+        }
+        Err(e) => {
+            editor.status_message = Some(format!("Error: {e}"));
+        }
+    }
+}
+
+fn ex_theme(editor: &mut Editor, name: Option<String>) {
+    match name {
+        None => {
+            editor.status_message =
+                Some(format!("Current theme: {}", editor.theme.name));
+        }
+        Some(name) => {
+            if let Some(theme) = builtin_theme(&name) {
+                editor.status_message = Some(format!("Theme: {name}"));
+                editor.theme = theme;
+            } else {
+                editor.status_message = Some(format!("Unknown theme: {name}"));
+            }
+        }
+    }
+}
 
 /// Resolve an ex address to a 0-based line index.
 fn resolve_address(editor: &Editor, addr: Address) -> Option<usize> {
@@ -1429,8 +1452,9 @@ pub(crate) fn apply_indent(
     // valid
     for line in (start_line..=end_line).rev() {
         let line_start = editor.document.text.line_to_char(line);
+        let width = editor.config.indent_width.max(1);
         if indent {
-            let txn = Transaction::insert(line_start, "    ");
+            let txn = Transaction::insert(line_start, &" ".repeat(width));
             let inv = txn.invert(&editor.document.text);
             if editor.document.apply_transaction(&txn).is_ok() {
                 editor.history.commit(txn, inv);
@@ -1442,8 +1466,11 @@ pub(crate) fn apply_indent(
                 .line(line)
                 .map(|l| l.chars().collect())
                 .unwrap_or_default();
-            let spaces =
-                line_text.chars().take(4).take_while(|c| *c == ' ').count();
+            let spaces = line_text
+                .chars()
+                .take(width)
+                .take_while(|c| *c == ' ')
+                .count();
             if spaces > 0 {
                 let txn = Transaction::delete(line_start, spaces);
                 let inv = txn.invert(&editor.document.text);

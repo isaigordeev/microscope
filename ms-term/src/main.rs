@@ -5,6 +5,7 @@ use ms_view::document::Document;
 use ms_view::editor::Editor;
 
 use ms_term::application;
+use ms_term::config_io;
 
 fn main() {
     let exit_code = main_impl();
@@ -29,7 +30,10 @@ async fn main_impl() -> i32 {
         Document::scratch()
     };
 
-    let editor = Editor::new(document, 24);
+    let mut editor = Editor::new(document, 24);
+    if let Some(error) = config_io::load_and_apply(&mut editor) {
+        editor.status_message = Some(error);
+    }
 
     let mut app = match application::Application::new(editor) {
         Ok(app) => app,

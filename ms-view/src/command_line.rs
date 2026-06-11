@@ -58,6 +58,10 @@ pub enum ExCommand {
     /// toggle (`number!`).
     SetNumber(Option<bool>),
     Theme(Option<String>),
+    /// `:config-reload` — re-read config files.
+    ConfigReload,
+    /// `:config-open` — edit the global config file.
+    ConfigOpen,
     Unknown(String),
 }
 
@@ -81,9 +85,12 @@ pub fn parse(input: &str) -> ExCommand {
         return range.map_or(ExCommand::Empty, |r| ExCommand::Goto(r.end));
     }
 
-    // Command word: leading alphabetic run.
+    // Command word: alphabetic run (plus `-` for
+    // helix-style commands like config-reload).
     let word_start = i;
-    while i < chars.len() && chars[i].is_ascii_alphabetic() {
+    while i < chars.len()
+        && (chars[i].is_ascii_alphabetic() || chars[i] == '-')
+    {
         i += 1;
     }
     let word: String = chars[word_start..i].iter().collect();
@@ -111,6 +118,8 @@ pub fn parse(input: &str) -> ExCommand {
         }
         "set" | "se" => parse_set(arg, input),
         "theme" => ExCommand::Theme((!arg.is_empty()).then(|| arg.to_owned())),
+        "config-reload" => ExCommand::ConfigReload,
+        "config-open" => ExCommand::ConfigOpen,
         _ => ExCommand::Unknown(input.to_owned()),
     }
 }
@@ -425,6 +434,12 @@ mod tests {
         assert_eq!(parse("set number"), ExCommand::SetNumber(Some(true)));
         assert_eq!(parse("set nonu"), ExCommand::SetNumber(Some(false)));
         assert_eq!(parse("set number!"), ExCommand::SetNumber(None));
+    }
+
+    #[test]
+    fn config_commands() {
+        assert_eq!(parse("config-reload"), ExCommand::ConfigReload);
+        assert_eq!(parse("config-open"), ExCommand::ConfigOpen);
     }
 
     #[test]
