@@ -10,11 +10,12 @@ workflow.
 
 1. [Philosophy](#philosophy)
 2. [Crate Architecture](#crate-architecture)
-3. [Feature Set](#feature-set)
-4. [Theme System](#theme-system)
-5. [Key Design Decisions](#key-design-decisions)
-6. [Testing Strategy](#testing-strategy)
-7. [Milestones](#milestones)
+3. [Plugin Parity Map](#plugin-parity-map)
+4. [Feature Set](#feature-set)
+5. [Theme System](#theme-system)
+6. [Key Design Decisions](#key-design-decisions)
+7. [Testing Strategy](#testing-strategy)
+8. [Milestones](#milestones)
 
 ---
 
@@ -132,6 +133,34 @@ ms-term ──→ ms-view ──→ ms-core
 - `tokio` — async runtime (LSP, file I/O)
 - `gix` (gitoxide) — git operations
 - `nucleo` — fuzzy matching for pickers
+
+---
+
+## Plugin Parity Map
+
+There is **no plugin layer** — same stance as Helix. Each Neovim plugin from
+`~/.dotfiles/nvim/lua/plugins.lua` is replaced by an ordinary module inside
+the crate that owns its concern. The crate is the architectural boundary;
+the module is the "plugin".
+
+| nvim plugin | Microscope home | Milestone |
+|---|---|---|
+| vim core grammar (verbs/motions/objects) | ms-view `command.rs` (VimMachine) + ms-core `movement.rs`/`textobject.rs` | M1 |
+| nvim-treesitter | ms-core `syntax.rs` + highlight in render path | M3 |
+| rainbow-delimiters | ms-core `syntax.rs` (tree-sitter queries) | M3 |
+| mason / mason-lspconfig | ms-lsp `registry.rs` (PATH discovery, root markers, lifecycle) | M4 |
+| nvim-cmp (+sources, LuaSnip) | ms-term `ui/completion.rs` + ms-lsp client | M4 |
+| conform.nvim (format on save) | ms-lsp format + external formatter runner | M4 |
+| telescope + fzf.vim | ms-term `ui/picker.rs` (nucleo, rg backend) | M2/M4 |
+| nvim-tree (incl. root history C/-/C-o) | ms-tree crate + ms-term `ui/filetree.rs` | M2 |
+| Comment.nvim (gcc/gc) | ms-core `comment.rs` (tree-sitter aware in M3) | M1g/M3 |
+| zen-mode.nvim | core rendering philosophy, ms-term `ui/editor.rs` | M6 |
+| gitsigns (gutter, hunks, stage/reset) | ms-git `diff.rs` | M5 |
+| diffview + fugitive + git-messenger | ms-git `blame.rs`/`history.rs` + ms-term `ui/diff.rs` — **to be unified into one coherent git diff UX; design before M5** | M5 |
+| russian.lua (Cyrillic remap, leader dup) | ms-term `russian.rs` | M6 |
+| sessions (mksession) | ms-view session save/restore | M6 |
+| keymaps.lua (leader bindings) | built-in default keymap trie, ms-view `keymap.rs` | M2+ |
+| baleia (tmux scrollback), claudecode.nvim | ideas/backlog.txt (tmux integration ideas) | backlog |
 
 ---
 

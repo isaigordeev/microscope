@@ -1,7 +1,7 @@
 M1 — Vim Modal Editing
 =======================
 Status: IN PROGRESS
-Next up: M1c
+Next up: M1d remainder (named registers a-z, clipboard) or M1e
 
 Architecture: Enum state machine (VimMachine) in ms-view.
 Each keypress → feed(key) → Option<Action>. No callbacks.
@@ -54,22 +54,38 @@ Verify: d2w deletes 2 words, 3dd deletes 3 lines, yy+p pastes
 
 ---
 
-M1c — Text Objects + Visual Mode + Selections             [TODO]
+M1c — Text Objects + Visual Mode + Selections             [DONE]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-New: ms-core/src/textobject.rs — find_textobject()
-     ms-core/src/selection.rs — Range (anchor/head), Selection
+New: ms-core/src/textobject.rs — word/paragraph/quote/pair
+     (pure fns, Helix-ported algorithms, vim semantics)
 
-Text objects: iw, aw, iW, aW, is, as, ip, ap,
+Text objects: iw, aw, iW, aW, ip, ap,
               i"/a", i'/a', i`/a`, i(/a(, i[/a[, i{/a{, i</a<
-Visual: v (charwise), V (linewise), Ctrl-V (blockwise)
-Mode additions: Visual, VisualLine, VisualBlock
+Visual: v (charwise), V (linewise)
+Mode::Visual { kind, anchor } — anchor lives in the mode,
+maps onto ms-core Range for the future Selection refactor.
+VimMachine::feed_visual() — separate entry point, editor
+routes by mode. Selection rendered via ui.selection overlay
+(Buffer::set_style merge). Visual p replaces selection.
+Esc-from-insert only clamps (existing convention, no left
+step); after linewise delete cursor goes to first non-blank
+(vim dap preserves column instead — minor deviation).
+Behavior verified against nvim -u NONE headless.
 
-Verify: ci" changes inside quotes, viw selects word, Vjjd deletes
+Deferred: Ctrl-V blockwise (VisualKind::Block defined,
+unbound), is/as sentence objects, gv, visual r/J/:'<,'>
+
+Verify: ci" changes inside quotes, viwd deletes word, Vjd ✓
 
 ---
 
-M1d — Undo/Redo Tree + Registers                          [TODO]
+M1d — Undo/Redo Tree + Registers                       [PARTIAL]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Already landed: ms-core/src/history.rs (u/Ctrl-R wired),
+ms-view/src/register.rs (unnamed register wired for y/d/p).
+Remaining: register *selection* grammar ("a-z, "0-9, "+, "_),
+clipboard via arboard, branch undo if history is linear.
+
 New: ms-core/src/history.rs — tree-based undo
      ms-core/src/register.rs — RegisterStore
 
