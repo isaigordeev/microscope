@@ -3,6 +3,7 @@ members = [
    "ms-core",
    "ms-view",
    "ms-term",
+   "ms-tree",
    "ms-tui",
    "ms-lsp",
    "ms-git",
@@ -17,6 +18,7 @@ edition = "2021"
 [workspace.dependencies]
 ms-core = { path = "ms-core" }
 ms-view = { path = "ms-view" }
+ms-tree = { path = "ms-tree" }
 ms-tui = { path = "ms-tui" }
 ms-lsp = { path = "ms-lsp" }
 ms-git = { path = "ms-git" }

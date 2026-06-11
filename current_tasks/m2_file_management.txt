@@ -5,15 +5,23 @@ Status: IN PROGRESS
 Goal: Multi-buffer editing, fuzzy picker, file tree sidebar.
 
 Tasks:
-- [ ] ms-tree crate: filesystem tree model
-      - Directory walking, sorting, .gitignore-aware filtering
-      - Tree data structure (expand/collapse nodes)
-      - Watch for filesystem changes (notify crate?)
-- [ ] File tree sidebar (nvim-tree style)
-      - Toggle show/hide
-      - Expand/collapse directories
-      - Open file from tree
-      - Create/delete/rename files
+- [x] ms-tree crate — DONE (2026-06-11)
+      - Flat-vector visible-rows model, lazy read_dir on
+        expand, dirs-first case-insensitive sort.
+      - Shows dotfiles + gitignored (user's nvim-tree
+        filters config). Deferred: fs watch (notify).
+- [x] File tree sidebar — DONE (2026-06-11)
+      - ms-term/ui/filetree.rs compositor layer, left
+        sidebar (40 cols max), Ctrl-n toggle.
+      - Keys (user's nvim-tree setup): j/k/g/G move,
+        Enter/l expand-or-open, h collapse-or-parent,
+        C / Ctrl-] root-to-node (+history), - root-to-
+        parent (+history), Ctrl-o previous root,
+        q/Esc/Ctrl-n close. Opens via open_document
+        (buffer-aware), closes on open.
+      - Deferred: create/delete/rename (a/d/r), find
+        current file (Ctrl-f / NvimTreeFindFile),
+        keep-open + focus switching, fs watch.
 - [x] Buffer management — DONE (2026-06-11)
       - Stash-based multi-buffer: editor.document stays THE
         active doc (disjoint field borrows keep working);

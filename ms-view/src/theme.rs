@@ -120,6 +120,7 @@ pub fn vs_dark() -> Theme {
         style_fg_bg(rgb(0xFF, 0xFF, 0xFF), rgb(0x00, 0x78, 0xD4)),
     );
     s.insert("ui.separator".into(), style_fg(rgb(0x45, 0x45, 0x45)));
+    s.insert("ui.directory".into(), style_fg(rgb(0x87, 0xCF, 0xFF)));
     s.insert("ui.virtual".into(), style_fg(rgb(0x2F, 0x2F, 0x2F)));
     s.insert("ui.match".into(), Style::default().bg(rgb(0x26, 0x4F, 0x78)));
     s.insert(
@@ -219,6 +220,7 @@ pub fn vs_light() -> Theme {
         style_fg_bg(rgb(0xFF, 0xFF, 0xFF), rgb(0x00, 0x7A, 0xCC)),
     );
     s.insert("ui.separator".into(), style_fg(rgb(0xD4, 0xD4, 0xD4)));
+    s.insert("ui.directory".into(), style_fg(rgb(0x04, 0x51, 0xA5)));
     s.insert("ui.virtual".into(), style_fg(rgb(0xF2, 0xF2, 0xF2)));
     s.insert("ui.match".into(), Style::default().bg(rgb(0x90, 0xC2, 0xF9)));
     s.insert(

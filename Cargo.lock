@@ -487,6 +487,7 @@ dependencies = [
  "ignore",
  "indoc",
  "ms-core",
+ "ms-tree",
  "ms-tui",
  "ms-view",
  "nucleo",
@@ -494,6 +495,13 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+]
+
+[[package]]
+name = "ms-tree"
+version = "0.1.3"
+dependencies = [
+ "tempfile",
 ]
 
 [[package]]

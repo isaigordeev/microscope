@@ -292,6 +292,13 @@ impl EditorView {
             return EventResult::Consumed(None);
         }
 
+        // ── File tree toggle ──
+        if key.code == KeyCode::Char('n')
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            return Self::open_file_tree(ctx);
+        }
+
         // ── Normal VimMachine dispatch ──
         if key.code == KeyCode::Esc {
             // Built-in `nohlsearch` on Esc.
@@ -318,6 +325,22 @@ impl EditorView {
         ctx.editor.status_message = None;
         commands::execute_action(ctx.editor, action);
         EventResult::Consumed(None)
+    }
+
+    /// Toggle the file tree sidebar.
+    fn open_file_tree(ctx: &mut Context) -> EventResult {
+        match crate::ui::filetree::FileTree::new() {
+            Ok(tree) => {
+                let cb: Callback = Box::new(move |compositor, _ctx| {
+                    compositor.push(Box::new(tree));
+                });
+                EventResult::Consumed(Some(cb))
+            }
+            Err(e) => {
+                ctx.editor.status_message = Some(format!("Error: {e}"));
+                EventResult::Consumed(None)
+            }
+        }
     }
 
     /// Push the buffer picker onto the compositor.
