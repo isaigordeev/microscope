@@ -1109,6 +1109,9 @@ impl VimMachine {
                 self.emit_and_reset(Action::EnterVisual(VisualKind::Line))
             }
 
+            // Ex command on the selection range
+            KeyCode::Char(':') => self.emit_and_reset(Action::EnterCommand),
+
             // Paste over selection
             KeyCode::Char('p') => self.emit_and_reset(Action::Special(
                 SpecialCommand::Paste,

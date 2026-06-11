@@ -717,3 +717,147 @@ fn count_before_register_select() {
 fn register_applies_to_next_op_only() {
     test(("#[|]#abc\ndef", "\"ayyjyyp", "abc\ndef\n#[|]#def\n"));
 }
+
+// ── Ex commands (verified against nvim -u NONE) ───
+
+#[test]
+fn ex_substitute_percent_global() {
+    test((
+        "#[|]#foo a foo\nbar foo\nx",
+        ":%s/foo/QQ/g<ret>",
+        "QQ a QQ\n#[|]#bar QQ\nx",
+    ));
+}
+
+#[test]
+fn ex_substitute_first_match_only() {
+    test(("#[|]#aa aa\naa", ":s/aa/X/<ret>", "#[|]#X aa\naa"));
+}
+
+#[test]
+fn ex_substitute_global_current_line() {
+    test(("aa a#[|]#a\naa", ":s/aa/X/g<ret>", "#[|]#X X\naa"));
+}
+
+#[test]
+fn ex_substitute_line_range() {
+    test(("#[|]#aa\naa\naa", ":1,2s/aa/X/<ret>", "X\n#[|]#X\naa"));
+}
+
+#[test]
+fn ex_substitute_dot_range() {
+    test(("aa\na#[|]#a\naa", ":.s/aa/X/<ret>", "aa\n#[|]#X\naa"));
+}
+
+#[test]
+fn ex_substitute_dollar_range() {
+    test(("#[|]#aa\naa\naa", ":$s/aa/X/<ret>", "aa\naa\n#[|]#X"));
+}
+
+#[test]
+fn ex_substitute_backrefs() {
+    // rust regex groups; vim-style \N backrefs translated
+    test(("#[|]#foo bar", ":s/(f..) (b..)/\\2 \\1/<ret>", "#[|]#bar foo"));
+}
+
+#[test]
+fn ex_substitute_not_found() {
+    let mut editor = test_editor("#[|]#abc");
+    for key in parse_keys(":s/zz/x/<ret>") {
+        ms_term::application::handle_key(&mut editor, key);
+    }
+    assert_eq!(editor_annotated(&editor), "#[|]#abc");
+    assert_eq!(
+        editor.status_message.as_deref(),
+        Some("Pattern not found: zz"),
+    );
+}
+
+#[test]
+fn ex_delete_line_range() {
+    test(("one\ntwo\nthree\nfo#[|]#ur", ":1,2d<ret>", "#[|]#three\nfour"));
+}
+
+#[test]
+fn ex_goto_line() {
+    test(("#[|]#a\n  bb\nc", ":3<ret>", "a\n  bb\n#[|]#c"));
+    test(("#[|]#a\n  bb\nc", ":2<ret>", "a\n#[|]#  bb\nc"));
+}
+
+#[test]
+fn ex_goto_clamps_past_end() {
+    test(("#[|]#a\nb", ":99<ret>", "a\n#[|]#b"));
+}
+
+#[test]
+fn ex_visual_range_substitute() {
+    // `:` from visual prefills '<,'>
+    test(("#[|]#aa\naa\naa", "Vj:s/aa/X/<ret>", "X\n#[|]#X\naa"));
+}
+
+#[test]
+fn ex_set_nonumber_toggles_flag() {
+    let mut editor = test_editor("#[|]#a");
+    assert!(editor.show_numbers);
+    for key in parse_keys(":set nonumber<ret>") {
+        ms_term::application::handle_key(&mut editor, key);
+    }
+    assert!(!editor.show_numbers);
+    for key in parse_keys(":set number!<ret>") {
+        ms_term::application::handle_key(&mut editor, key);
+    }
+    assert!(editor.show_numbers);
+}
+
+#[test]
+fn ex_command_history_cycles() {
+    let mut editor = test_editor("#[|]#a");
+    for key in parse_keys(":set number<ret>:theme<ret>") {
+        ms_term::application::handle_key(&mut editor, key);
+    }
+    // `:` then Up twice → older entry
+    for key in parse_keys(":") {
+        ms_term::application::handle_key(&mut editor, key);
+    }
+    let up = crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Up,
+        crossterm::event::KeyModifiers::NONE,
+    );
+    ms_term::application::handle_key(&mut editor, up);
+    assert_eq!(editor.command_buffer, "theme");
+    ms_term::application::handle_key(&mut editor, up);
+    assert_eq!(editor.command_buffer, "set number");
+}
+
+#[test]
+fn ex_edit_opens_file() {
+    use std::io::Write as _;
+    let mut file = tempfile::NamedTempFile::new().unwrap_or_else(|e| {
+        panic!("tempfile: {e}");
+    });
+    write!(file, "from disk\nline two").unwrap_or_else(|e| {
+        panic!("write: {e}");
+    });
+    let path = file.path().display().to_string();
+
+    let mut editor = test_editor("#[|]#old");
+    for key in parse_keys(&format!(":e {path}<ret>")) {
+        ms_term::application::handle_key(&mut editor, key);
+    }
+    assert_eq!(editor_annotated(&editor), "#[|]#from disk\nline two");
+    assert_eq!(editor.document.path.as_deref(), Some(file.path()));
+}
+
+#[test]
+fn ex_edit_refuses_unsaved_changes() {
+    let mut editor = test_editor("#[|]#old");
+    editor.document.modified = true;
+    for key in parse_keys(":e somewhere.txt<ret>") {
+        ms_term::application::handle_key(&mut editor, key);
+    }
+    assert_eq!(editor_annotated(&editor), "#[|]#old");
+    assert!(editor
+        .status_message
+        .as_deref()
+        .is_some_and(|m| m.contains("No write since last change")));
+}

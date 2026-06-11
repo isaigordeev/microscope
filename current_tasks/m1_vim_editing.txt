@@ -1,8 +1,8 @@
 M1 — Vim Modal Editing
 =======================
 Status: IN PROGRESS
-Next up: M1g (ex command line: :s///, ranges, :e) or M1f
-(macros + dot repeat, skipped for now per user)
+Next up: M1f (macros + dot repeat — skipped earlier per
+user, last remaining M1 item) or move on to M2
 
 Architecture: Enum state machine (VimMachine) in ms-view.
 Each keypress → feed(key) → Option<Action>. No callbacks.
@@ -136,12 +136,30 @@ Verify: qa0dwjq → @a replays, dw → . deletes another word
 
 ---
 
-M1g — Ex Command Line (full) + Polish                     [TODO]
+M1g — Ex Command Line (full) + Polish                     [DONE]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-New: ms-view/src/command_line.rs — ExCommand parser
+New: ms-view/src/command_line.rs — pure ExCommand parser
+(Address/ExRange/ExCommand), executor in ms-term.
 
-Ex commands: :s/pat/rep/flags, :%s/..., :1,5d, :e file, :set
-Line ranges: . (current), % (whole), single, range, '<,'>
-Command history: up/down cycles previous commands
+Ex commands: :s/pat/rep/flags (g, i; any separator;
+escaped sep), :%s, :1,5d, :e file (new-file + e!),
+:w [path] (save-as), :N goto, :set number/nonumber/
+number! (gutter toggles live), :theme. Ranges: number,
+., $, %, 'mark, '<,'>. `:` from visual prefills '<,'>
+(sets the marks). Substitute = single transaction
+(one undo), cursor to last changed line, sets active
+search pattern, reports "N substitutions on M lines".
+Command history: Up/Down cycle (editor.command_history);
+prompt component now delegates to commands::handle_command
+so headless tests and TUI share one path.
 
-Verify: :%s/foo/bar/g replaces all, :1,5d deletes lines
+NOTE: patterns are Rust regex syntax (same engine as /
+search, Helix stance), NOT vim magic — \(\) groups are
+(), but \1 backrefs in replacement are translated.
+Behavior verified against nvim -u NONE headless.
+
+Deferred: :g//, :normal, :y/:m/:t line ops, :set
+beyond number, q: command-line window, search history
+prompt.
+
+Verify: :%s/foo/bar/g replaces all, :1,5d deletes ✓

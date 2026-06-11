@@ -9,6 +9,7 @@ use ms_view::command::{
     Action, InsertVariant, KeyCode as VKeyCode, KeyInput, Motion, MotionType,
     Operator, SpecialCommand, TextObjectTarget,
 };
+use ms_view::command_line::{self, Address, ExCommand, ExRange};
 use ms_view::editor::Editor;
 use ms_view::mode::{Mode, VisualKind};
 use ms_view::theme::builtin_theme;
@@ -145,10 +146,40 @@ pub(crate) fn handle_command(editor: &mut Editor, key: KeyEvent) {
                 editor.command_buffer.pop();
             }
         }
+        KeyCode::Up => history_up(editor),
+        KeyCode::Down => history_down(editor),
         KeyCode::Char(c) => {
             editor.command_buffer.push(c);
         }
         _ => {}
+    }
+}
+
+fn history_up(editor: &mut Editor) {
+    if editor.command_history.is_empty() {
+        return;
+    }
+    let pos = editor
+        .history_pos
+        .map_or(editor.command_history.len() - 1, |p| p.saturating_sub(1));
+    editor.history_pos = Some(pos);
+    if let Some(cmd) = editor.command_history.get(pos) {
+        editor.command_buffer.clone_from(cmd);
+    }
+}
+
+fn history_down(editor: &mut Editor) {
+    let Some(pos) = editor.history_pos else {
+        return;
+    };
+    if pos + 1 >= editor.command_history.len() {
+        editor.history_pos = None;
+        editor.command_buffer.clear();
+    } else {
+        editor.history_pos = Some(pos + 1);
+        if let Some(cmd) = editor.command_history.get(pos + 1) {
+            editor.command_buffer.clone_from(cmd);
+        }
     }
 }
 
@@ -296,14 +327,17 @@ fn search_word(editor: &mut Editor, backward: bool, count: usize) {
 }
 
 pub(crate) fn execute_command(editor: &mut Editor, cmd: &str) {
-    let cmd = cmd.trim();
-    let (word, arg) = cmd
-        .split_once(char::is_whitespace)
-        .map_or((cmd, ""), |(w, a)| (w, a.trim()));
+    let trimmed = cmd.trim();
+    if !trimmed.is_empty()
+        && editor.command_history.last().map(String::as_str) != Some(trimmed)
+    {
+        editor.command_history.push(trimmed.to_owned());
+    }
 
-    match word {
-        "q" => {
-            if editor.document.modified {
+    match command_line::parse(cmd) {
+        ExCommand::Empty => {}
+        ExCommand::Quit { force } => {
+            if editor.document.modified && !force {
                 editor.status_message = Some(
                     "No write since last change \
                      (add ! to override)"
@@ -313,44 +347,264 @@ pub(crate) fn execute_command(editor: &mut Editor, cmd: &str) {
                 editor.should_quit = true;
             }
         }
-        "q!" => {
-            editor.should_quit = true;
+        ExCommand::Write { path } => {
+            if let Some(path) = path {
+                editor.document.path = Some(path.into());
+            }
+            match editor.document.save() {
+                Ok(()) => {
+                    let name = editor.document.path.as_ref().map_or_else(
+                        || "[scratch]".to_owned(),
+                        |p| p.display().to_string(),
+                    );
+                    editor.status_message =
+                        Some(format!("\"{name}\" written"));
+                }
+                Err(e) => {
+                    editor.status_message = Some(format!("Error: {e}"));
+                }
+            }
         }
-        "w" => match editor.document.save() {
-            Ok(()) => {
-                let name = editor.document.path.as_ref().map_or_else(
-                    || "[scratch]".to_owned(),
-                    |p| p.display().to_string(),
-                );
-                editor.status_message = Some(format!("\"{name}\" written"));
-            }
-            Err(e) => {
-                editor.status_message = Some(format!("Error: {e}"));
-            }
-        },
-        "wq" | "x" => {
+        ExCommand::WriteQuit => {
             if let Err(e) = editor.document.save() {
                 editor.status_message = Some(format!("Error: {e}"));
             } else {
                 editor.should_quit = true;
             }
         }
-        "theme" => {
-            if arg.is_empty() {
-                editor.status_message =
-                    Some(format!("Current theme: {}", editor.theme.name,));
-            } else if let Some(theme) = builtin_theme(arg) {
-                editor.status_message = Some(format!("Theme: {arg}"));
-                editor.theme = theme;
-            } else {
-                editor.status_message = Some(format!("Unknown theme: {arg}"));
+        ExCommand::Edit { path, force } => {
+            ex_edit(editor, &path, force);
+        }
+        ExCommand::Substitute {
+            range,
+            pattern,
+            replacement,
+            global,
+            ignore_case,
+        } => {
+            ex_substitute(
+                editor,
+                range,
+                &pattern,
+                &replacement,
+                global,
+                ignore_case,
+            );
+        }
+        ExCommand::DeleteLines { range } => {
+            ex_delete_lines(editor, range);
+        }
+        ExCommand::Goto(addr) => {
+            if let Some(line) = resolve_address(editor, addr) {
+                editor.view.cursor_line = line;
+                editor.view.set_col(0);
+                editor.view.ensure_cursor_visible();
             }
         }
-        _ => {
+        ExCommand::SetNumber(value) => {
+            editor.show_numbers = value.unwrap_or(!editor.show_numbers);
+        }
+        ExCommand::Theme(name) => match name {
+            None => {
+                editor.status_message =
+                    Some(format!("Current theme: {}", editor.theme.name,));
+            }
+            Some(name) => {
+                if let Some(theme) = builtin_theme(&name) {
+                    editor.status_message = Some(format!("Theme: {name}"));
+                    editor.theme = theme;
+                } else {
+                    editor.status_message =
+                        Some(format!("Unknown theme: {name}"));
+                }
+            }
+        },
+        ExCommand::Unknown(cmd) => {
             editor.status_message =
                 Some(format!("Not an editor command: {cmd}"));
         }
     }
+}
+
+// ── Ex command execution ──────────────────────────
+
+/// Resolve an ex address to a 0-based line index.
+fn resolve_address(editor: &Editor, addr: Address) -> Option<usize> {
+    match addr {
+        Address::Line(n) => Some(n.saturating_sub(1).min(editor.max_line())),
+        Address::Current => Some(editor.view.cursor_line),
+        Address::Last => Some(editor.max_line()),
+        Address::Mark(c) => editor.marks.get(&c).map(|&pos| {
+            editor
+                .document
+                .text
+                .char_to_line(pos.min(editor.document.text.len_chars()))
+        }),
+    }
+}
+
+/// Resolve a range to inclusive 0-based line indices;
+/// defaults to the cursor line.
+fn resolve_range(
+    editor: &mut Editor,
+    range: Option<ExRange>,
+) -> Option<(usize, usize)> {
+    let Some(range) = range else {
+        let line = editor.view.cursor_line;
+        return Some((line, line));
+    };
+    let (Some(start), Some(end)) = (
+        resolve_address(editor, range.start),
+        resolve_address(editor, range.end),
+    ) else {
+        editor.status_message = Some("Mark not set".to_owned());
+        return None;
+    };
+    Some(if start <= end { (start, end) } else { (end, start) })
+}
+
+fn ex_substitute(
+    editor: &mut Editor,
+    range: Option<ExRange>,
+    pattern: &str,
+    replacement: &str,
+    global: bool,
+    ignore_case: bool,
+) {
+    let Some((start_line, end_line)) = resolve_range(editor, range) else {
+        return;
+    };
+    let source = if ignore_case {
+        format!("(?i){pattern}")
+    } else {
+        pattern.to_owned()
+    };
+    let Some(re) = search::compile(&source) else {
+        editor.status_message = Some(format!("Invalid pattern: {pattern}"));
+        return;
+    };
+    let repl = command_line::translate_backrefs(replacement);
+
+    let mut new_text = String::new();
+    let mut substitutions = 0usize;
+    let mut lines_changed = 0usize;
+    let mut last_changed = start_line;
+    for line in start_line..=end_line {
+        let original: String = editor
+            .document
+            .line(line)
+            .map(|l| l.chars().collect())
+            .unwrap_or_default();
+        let (content, newline) = original
+            .strip_suffix('\n')
+            .map_or((original.as_str(), ""), |c| (c, "\n"));
+        let count = if global {
+            re.find_iter(content).count()
+        } else {
+            usize::from(re.is_match(content))
+        };
+        if count > 0 {
+            substitutions += count;
+            lines_changed += 1;
+            last_changed = line;
+            let replaced = if global {
+                re.replace_all(content, repl.as_str())
+            } else {
+                re.replace(content, repl.as_str())
+            };
+            new_text.push_str(&replaced);
+        } else {
+            new_text.push_str(content);
+        }
+        new_text.push_str(newline);
+    }
+
+    if substitutions == 0 {
+        editor.status_message = Some(format!("Pattern not found: {pattern}"));
+        return;
+    }
+
+    let start = editor.document.text.line_to_char(start_line);
+    let end = if end_line + 1 < editor.document.text.len_lines() {
+        editor.document.text.line_to_char(end_line + 1)
+    } else {
+        editor.document.text.len_chars()
+    };
+    let txn = Transaction::replace(start, end - start, &new_text);
+    let inv = txn.invert(&editor.document.text);
+    if editor.document.apply_transaction(&txn).is_ok() {
+        editor.history.commit(txn, inv);
+        editor.view.cursor_line = last_changed.min(editor.max_line());
+        let col = editor.first_non_blank_col(editor.view.cursor_line);
+        editor.view.set_col(col);
+        editor.view.ensure_cursor_visible();
+        // `:s` patterns become the active search.
+        editor.search.pattern = source;
+        editor.search.active = true;
+        if substitutions > 1 {
+            editor.status_message = Some(format!(
+                "{substitutions} substitutions on {lines_changed} lines",
+            ));
+        }
+    }
+}
+
+fn ex_delete_lines(editor: &mut Editor, range: Option<ExRange>) {
+    let Some((start_line, end_line)) = resolve_range(editor, range) else {
+        return;
+    };
+    let start = editor.document.text.line_to_char(start_line);
+    let end = if end_line + 1 < editor.document.text.len_lines() {
+        editor.document.text.line_to_char(end_line + 1)
+    } else {
+        editor.document.text.len_chars()
+    };
+    if start >= end {
+        return;
+    }
+    let mut text: String =
+        editor.document.text.slice(start..end).chars().collect();
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    store_yank(editor, text, true);
+    apply_delete(editor, start, end, MotionType::Linewise);
+}
+
+fn ex_edit(editor: &mut Editor, path: &str, force: bool) {
+    if editor.document.modified && !force {
+        editor.status_message = Some(
+            "No write since last change \
+             (add ! to override)"
+                .to_owned(),
+        );
+        return;
+    }
+    let path_buf = std::path::PathBuf::from(path);
+    let document = match ms_view::document::Document::open(&path_buf) {
+        Ok(doc) => doc,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // New file: empty buffer with this path.
+            let mut doc = ms_view::document::Document::scratch();
+            doc.path = Some(path_buf);
+            editor.status_message = Some(format!("\"{path}\" [new file]"));
+            doc
+        }
+        Err(e) => {
+            editor.status_message = Some(format!("Error: {e}"));
+            return;
+        }
+    };
+    let lines = document.line_count();
+    if editor.status_message.is_none() {
+        editor.status_message = Some(format!("\"{path}\" {lines} lines"));
+    }
+    editor.document = document;
+    editor.history = ms_core::history::History::new();
+    editor.marks.clear();
+    editor.view.cursor_line = 0;
+    editor.view.set_col(0);
+    editor.view.scroll_offset = 0;
 }
 
 // ── Action dispatch ───────────────────────────────
@@ -402,7 +656,20 @@ pub(crate) fn execute_action(editor: &mut Editor, action: Action) {
             execute_insert(editor, variant);
         }
         Action::EnterCommand => {
+            let visual_range_marks =
+                if let Mode::Visual { anchor, .. } = editor.mode {
+                    let head = cursor_pos(editor);
+                    Some((anchor.min(head), anchor.max(head)))
+                } else {
+                    None
+                };
             editor.enter_command();
+            if let Some((start, end)) = visual_range_marks {
+                // vim: `:` from visual prefills '<,'>
+                editor.marks.insert('<', start);
+                editor.marks.insert('>', end);
+                editor.command_buffer.push_str("'<,'>");
+            }
         }
         Action::EnterSearch { backward } => {
             editor.search_origin = cursor_pos(editor);

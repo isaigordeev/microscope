@@ -16,6 +16,16 @@ use crate::ui::prompt::Prompt;
 
 const GUTTER_WIDTH: u16 = 6;
 
+/// Gutter width: 0 when line numbers are off
+/// (`:set nonumber`).
+const fn gutter_width(editor: &Editor) -> u16 {
+    if editor.show_numbers {
+        GUTTER_WIDTH
+    } else {
+        0
+    }
+}
+
 /// The base editor layer — always at the bottom of
 /// the compositor stack.
 #[derive(Debug, Default)]
@@ -59,7 +69,16 @@ impl Component for EditorView {
             }
             Mode::Visual { .. } => {
                 ctx.editor.status_message = None;
-                commands::handle_visual(ctx.editor, *key);
+                let input = commands::to_key_input(*key);
+                let action = ctx.editor.vim.feed_visual(input);
+                let opens_prompt = matches!(action, Action::EnterCommand);
+                commands::execute_action(ctx.editor, action);
+                if opens_prompt {
+                    let cb: Callback = Box::new(|compositor, _ctx| {
+                        compositor.push(Box::new(Prompt::command()));
+                    });
+                    return EventResult::Consumed(Some(cb));
+                }
                 EventResult::Consumed(None)
             }
         }
@@ -75,24 +94,27 @@ impl Component for EditorView {
         let text_height = area.height.saturating_sub(1);
 
         // ── Lines ──
+        let gutter = gutter_width(ctx.editor);
         for row in 0..text_height {
             let doc_line = ctx.editor.view.scroll_offset + row as usize;
 
             if let Some(line) = ctx.editor.document.line(doc_line) {
-                let num_str = format!("{:>4} ", doc_line + 1);
-                let ln_style = if doc_line == ctx.editor.view.cursor_line {
-                    cursor_ln_style
-                } else {
-                    line_num_style
-                };
-                surface.put_str(0, row, &num_str, ln_style);
+                if gutter > 0 {
+                    let num_str = format!("{:>4} ", doc_line + 1);
+                    let ln_style = if doc_line == ctx.editor.view.cursor_line {
+                        cursor_ln_style
+                    } else {
+                        line_num_style
+                    };
+                    surface.put_str(0, row, &num_str, ln_style);
+                }
 
                 let line_text: String =
                     line.chars().take_while(|c| *c != '\n').collect();
-                let max_cols = area.width.saturating_sub(GUTTER_WIDTH);
+                let max_cols = area.width.saturating_sub(gutter);
                 let truncated: String =
                     line_text.chars().take(max_cols as usize).collect();
-                surface.put_str(GUTTER_WIDTH, row, &truncated, text_style);
+                surface.put_str(gutter, row, &truncated, text_style);
             } else {
                 surface.put_str(0, row, "~", line_num_style);
             }
@@ -124,7 +146,7 @@ impl Component for EditorView {
         _area: Rect,
         editor: &Editor,
     ) -> (Option<Position>, CursorKind) {
-        let col = GUTTER_WIDTH + editor.view.cursor_col as u16;
+        let col = gutter_width(editor) + editor.view.cursor_col as u16;
         let row = editor.view.cursor_screen_row();
         let kind = match editor.mode {
             Mode::Normal | Mode::Visual { .. } => CursorKind::Block,
@@ -159,7 +181,8 @@ fn render_search_matches(
     };
     let style = editor.theme.resolve("ui.match");
     let text = &editor.document.text;
-    let max_width = area.width.saturating_sub(GUTTER_WIDTH);
+    let gutter = gutter_width(editor);
+    let max_width = area.width.saturating_sub(gutter);
 
     for (start, end) in ms_core::search::find_all(text, &re) {
         for row in 0..text_height {
@@ -177,8 +200,8 @@ fn render_search_matches(
             let to = (end.min(line_end) - line_start).max(from + 1);
             let width =
                 u16::try_from(to - from).unwrap_or(u16::MAX).min(max_width);
-            let x = GUTTER_WIDTH
-                .saturating_add(u16::try_from(from).unwrap_or(u16::MAX));
+            let x =
+                gutter.saturating_add(u16::try_from(from).unwrap_or(u16::MAX));
             surface.set_style(x, row, width, style);
         }
     }
@@ -197,7 +220,8 @@ fn render_selection(
     let sel_style = editor.theme.resolve("ui.selection");
     let (start, end, mt) = commands::visual_range(editor, kind, anchor);
     let text = &editor.document.text;
-    let max_width = area.width.saturating_sub(GUTTER_WIDTH);
+    let gutter = gutter_width(editor);
+    let max_width = area.width.saturating_sub(gutter);
 
     for row in 0..text_height {
         let doc_line = editor.view.scroll_offset + row as usize;
@@ -229,8 +253,7 @@ fn render_selection(
 
         let width =
             u16::try_from(to - from).unwrap_or(u16::MAX).min(max_width);
-        let x = GUTTER_WIDTH
-            .saturating_add(u16::try_from(from).unwrap_or(u16::MAX));
+        let x = gutter.saturating_add(u16::try_from(from).unwrap_or(u16::MAX));
         surface.set_style(x, row, width, sel_style);
     }
 }

@@ -54,6 +54,12 @@ pub struct Editor {
     pub marks: HashMap<char, usize>,
     /// Last `f`/`F`/`t`/`T` motion, for `;` and `,`.
     pub last_find: Option<Motion>,
+    /// Line numbers in the gutter (`:set number`).
+    pub show_numbers: bool,
+    /// Executed `:` commands, oldest first.
+    pub command_history: Vec<String>,
+    /// Position while cycling history with Up/Down.
+    pub history_pos: Option<usize>,
 }
 
 impl Editor {
@@ -74,6 +80,9 @@ impl Editor {
             search_origin: 0,
             marks: HashMap::new(),
             last_find: None,
+            show_numbers: true,
+            command_history: Vec::new(),
+            history_pos: None,
         }
     }
 
@@ -150,6 +159,7 @@ impl Editor {
     pub fn enter_command(&mut self) {
         self.mode = Mode::Command;
         self.command_buffer.clear();
+        self.history_pos = None;
     }
 
     /// First non-blank column on a line.
