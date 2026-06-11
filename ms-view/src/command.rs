@@ -228,6 +228,9 @@ pub enum Action {
     EnterCommand,
     /// Open the search prompt (`/` or `?`).
     EnterSearch { backward: bool },
+    /// `"{char}` — use this register for the next
+    /// yank/delete/paste.
+    SelectRegister(char),
     /// Special single-key command.
     Special(SpecialCommand, usize),
     /// Enter (or toggle) visual mode (`v`/`V`).
@@ -312,6 +315,7 @@ enum CharPurpose {
     SetMark,
     MarkLine,
     MarkChar,
+    SelectRegister,
     OpMarkLine { operator: Operator },
     OpMarkChar { operator: Operator },
 }
@@ -554,6 +558,14 @@ impl VimMachine {
             KeyCode::Char('`') => {
                 self.state =
                     VimState::WaitingChar { purpose: CharPurpose::MarkChar };
+                Action::None
+            }
+
+            // Register select ("ayy)
+            KeyCode::Char('"') => {
+                self.state = VimState::WaitingChar {
+                    purpose: CharPurpose::SelectRegister,
+                };
                 Action::None
             }
 
@@ -849,6 +861,15 @@ impl VimMachine {
                     count,
                 })
             }
+            CharPurpose::SelectRegister => {
+                // Keep any pending count: 3"add == "a3dd.
+                self.state = if self.count1.is_some() {
+                    VimState::Count
+                } else {
+                    VimState::Normal
+                };
+                Action::SelectRegister(c)
+            }
             CharPurpose::SetMark => self.emit_and_reset(Action::Special(
                 SpecialCommand::SetMark(c),
                 1,
@@ -1072,6 +1093,12 @@ impl VimMachine {
                 };
                 Action::None
             }
+            KeyCode::Char('"') => {
+                self.state = VimState::VisualWaitingChar {
+                    purpose: CharPurpose::SelectRegister,
+                };
+                Action::None
+            }
 
             // Selection control
             KeyCode::Char('o') => self.emit_and_reset(Action::SwapAnchor),
@@ -1149,6 +1176,14 @@ impl VimMachine {
             self.reset();
             return Action::None;
         };
+        if purpose == CharPurpose::SelectRegister {
+            self.state = if self.count1.is_some() {
+                VimState::VisualCount
+            } else {
+                VimState::Normal
+            };
+            return Action::SelectRegister(c);
+        }
         let count = self.effective_count();
         let motion = match purpose {
             CharPurpose::FindChar => Motion::FindChar(c),
@@ -1990,6 +2025,39 @@ mod tests {
         assert_eq!(
             m.feed(key(',')),
             Action::Move(Motion::RepeatFindReverse, 1),
+        );
+    }
+
+    // ── Register select ───────────────────────────
+
+    #[test]
+    fn select_register() {
+        let mut m = VimMachine::new();
+        m.feed(key('"'));
+        assert_eq!(m.feed(key('a')), Action::SelectRegister('a'));
+    }
+
+    #[test]
+    fn count_survives_register_select() {
+        let mut m = VimMachine::new();
+        m.feed(key('3'));
+        m.feed(key('"'));
+        assert_eq!(m.feed(key('a')), Action::SelectRegister('a'));
+        m.feed(key('d'));
+        assert_eq!(
+            m.feed(key('d')),
+            Action::OperatorLine { operator: Operator::Delete, count: 3 },
+        );
+    }
+
+    #[test]
+    fn register_select_in_visual() {
+        let mut m = VimMachine::new();
+        m.feed_visual(key('"'));
+        assert_eq!(m.feed_visual(key('+')), Action::SelectRegister('+'));
+        assert_eq!(
+            m.feed_visual(key('y')),
+            Action::VisualOperator(Operator::Yank),
         );
     }
 }

@@ -29,6 +29,14 @@ impl Registers {
         self.inner.get(&reg).and_then(|v| v.last()).map(String::as_str)
     }
 
+    /// All values of a register joined together —
+    /// what paste should insert for appended (`"A`)
+    /// registers.
+    #[must_use]
+    pub fn joined(&self, reg: char) -> Option<String> {
+        self.read_all(reg).map(<[String]>::concat).filter(|s| !s.is_empty())
+    }
+
     /// Read all values from a register.
     #[must_use]
     pub fn read_all(&self, reg: char) -> Option<&[String]> {

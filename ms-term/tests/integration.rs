@@ -671,3 +671,49 @@ fn comma_reverses_repeat() {
 fn delete_with_semicolon() {
     test(("#[|]#a.b.c", "f.d;", "a#[|]#c"));
 }
+
+// ── Registers (verified against nvim -u NONE) ─────
+
+#[test]
+fn named_register_yank_paste() {
+    test(("#[|]#abc\ndef", "\"ayyj\"ap", "abc\ndef\n#[|]#abc\n"));
+}
+
+#[test]
+fn uppercase_register_appends() {
+    test((
+        "#[|]#abc\ndef\nx",
+        "\"ayyj\"AyyG\"ap",
+        "abc\ndef\nx\n#[|]#abc\ndef\n",
+    ));
+}
+
+#[test]
+fn blackhole_preserves_unnamed() {
+    test(("#[|]#abc\ndef\nx", "yyj\"_ddp", "abc\nx\n#[|]#abc\n"));
+}
+
+#[test]
+fn yank_register_zero_survives_delete() {
+    test(("#[|]#abc def", "yw$x\"0p", "abc deabc#[|]# "));
+}
+
+#[test]
+fn numbered_registers_shift_on_delete() {
+    test(("#[|]#one\ntwo\nthree", "dddd\"1p\"2p", "three\ntwo\n#[|]#one\n"));
+}
+
+#[test]
+fn x_stores_small_delete() {
+    test(("#[|]#abcd", "x$p", "bcd#[|]#a"));
+}
+
+#[test]
+fn count_before_register_select() {
+    test(("#[|]#a\nb\nc\nx", "3\"add\"ap", "x\n#[|]#a\nb\nc\n"));
+}
+
+#[test]
+fn register_applies_to_next_op_only() {
+    test(("#[|]#abc\ndef", "\"ayyjyyp", "abc\ndef\n#[|]#def\n"));
+}

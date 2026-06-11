@@ -357,6 +357,10 @@ pub(crate) fn execute_command(editor: &mut Editor, cmd: &str) {
 
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn execute_action(editor: &mut Editor, action: Action) {
+    // `"x` only applies to the immediately following
+    // command; any other executed action consumes it.
+    let keep_register =
+        matches!(action, Action::SelectRegister(_) | Action::None);
     match action {
         Action::Move(motion, count) => {
             let motion = remember_or_repeat_find(editor, motion);
@@ -426,7 +430,13 @@ pub(crate) fn execute_action(editor: &mut Editor, action: Action) {
         Action::VisualTextObject { around, target, count } => {
             select_textobject(editor, around, target, count);
         }
+        Action::SelectRegister(reg) => {
+            editor.yank_register = reg;
+        }
         Action::None => {}
+    }
+    if !keep_register {
+        editor.yank_register = '"';
     }
 }
 
@@ -623,8 +633,7 @@ pub(crate) fn paste_over_selection(editor: &mut Editor) {
         return;
     };
     let reg = editor.yank_register;
-    let Some(new_text) = editor.registers.read(reg).map(ToString::to_string)
-    else {
+    let Some(new_text) = register_text(editor, reg) else {
         editor.enter_normal();
         return;
     };
@@ -982,13 +991,11 @@ pub(crate) fn apply_operator(
 
     match op {
         Operator::Delete => {
-            let reg = editor.yank_register;
-            editor.registers.write(reg, text);
+            store_yank(editor, text, true);
             apply_delete(editor, start, end, mt);
         }
         Operator::Change => {
-            let reg = editor.yank_register;
-            editor.registers.write(reg, text);
+            store_yank(editor, text, true);
             apply_delete(editor, start, end, mt);
             // Insert exactly at the deletion point,
             // which may be one past line end (`ciw` on
@@ -996,8 +1003,7 @@ pub(crate) fn apply_operator(
             set_insert_at(editor, start);
         }
         Operator::Yank => {
-            let reg = editor.yank_register;
-            editor.registers.write(reg, text);
+            store_yank(editor, text, false);
         }
         Operator::Indent => {
             apply_indent(editor, start, end, true);
@@ -1056,8 +1062,7 @@ pub(crate) fn change_lines(editor: &mut Editor, count: usize) {
                 .slice(start..start + len)
                 .chars()
                 .collect();
-            let reg = editor.yank_register;
-            editor.registers.write(reg, text);
+            store_yank(editor, text, true);
             let txn = Transaction::delete(start, len);
             let inv = txn.invert(&editor.document.text);
             if editor.document.apply_transaction(&txn).is_ok() {
@@ -1075,8 +1080,7 @@ pub(crate) fn change_lines(editor: &mut Editor, count: usize) {
         // through end of range, then clear first line
         let text: String =
             editor.document.text.slice(start..end).chars().collect();
-        let reg = editor.yank_register;
-        editor.registers.write(reg, text);
+        store_yank(editor, text, true);
 
         // Delete lines after first
         if first_nl + 1 < end {
@@ -1252,8 +1256,7 @@ pub(crate) fn execute_special(
                 let end = editor.document.line_col_to_char(line, len);
                 let text: String =
                     editor.document.text.slice(start..end).chars().collect();
-                let reg = editor.yank_register;
-                editor.registers.write(reg, text);
+                store_yank(editor, text, true);
                 let txn = Transaction::delete(start, end - start);
                 let inv = txn.invert(&editor.document.text);
                 if editor.document.apply_transaction(&txn).is_ok() {
@@ -1306,8 +1309,7 @@ pub(crate) fn execute_special(
                 let end = editor.document.line_col_to_char(line, len);
                 let text: String =
                     editor.document.text.slice(start..end).chars().collect();
-                let reg = editor.yank_register;
-                editor.registers.write(reg, text);
+                store_yank(editor, text, true);
                 let txn = Transaction::delete(start, end - start);
                 let inv = txn.invert(&editor.document.text);
                 if editor.document.apply_transaction(&txn).is_ok() {
@@ -1326,8 +1328,7 @@ pub(crate) fn execute_special(
                 let end = editor.document.line_col_to_char(line, len);
                 let text: String =
                     editor.document.text.slice(start..end).chars().collect();
-                let reg = editor.yank_register;
-                editor.registers.write(reg, text);
+                store_yank(editor, text, true);
                 let txn = Transaction::delete(start, end - start);
                 let inv = txn.invert(&editor.document.text);
                 if editor.document.apply_transaction(&txn).is_ok() {
@@ -1338,10 +1339,12 @@ pub(crate) fn execute_special(
         }
         SpecialCommand::YankLine => {
             let (start, end) = line_range(editor, count);
-            let text: String =
+            let mut text: String =
                 editor.document.text.slice(start..end).chars().collect();
-            let reg = editor.yank_register;
-            editor.registers.write(reg, text);
+            if !text.ends_with('\n') {
+                text.push('\n');
+            }
+            store_yank(editor, text, false);
         }
         SpecialCommand::IndentLine => {
             let (start, end) = line_range(editor, count);
@@ -1395,12 +1398,81 @@ pub(crate) fn execute_special(
     }
 }
 
+// ── Register routing ──────────────────────────────
+
+/// Route yanked/deleted text to the right registers:
+/// the selected one (named, `+` clipboard, `_`
+/// discard), plus vim's implicit ones — `"` always,
+/// `0` for yanks, `1`-`9` shift for line deletes,
+/// `-` for small deletes.
+pub(crate) fn store_yank(editor: &mut Editor, text: String, is_delete: bool) {
+    let reg = editor.yank_register;
+    match reg {
+        '_' => {}
+        '+' => {
+            clipboard_set(&text);
+            editor.registers.write('"', text);
+        }
+        '"' => {
+            if is_delete {
+                if text.contains('\n') {
+                    shift_numbered_registers(editor);
+                    editor.registers.write('1', text.clone());
+                } else {
+                    editor.registers.write('-', text.clone());
+                }
+            } else {
+                editor.registers.write('0', text.clone());
+            }
+            editor.registers.write('"', text);
+        }
+        c if c.is_ascii_uppercase() => {
+            editor.registers.push(c, text.clone());
+            editor.registers.write('"', text);
+        }
+        c => {
+            editor.registers.write(c, text.clone());
+            editor.registers.write('"', text);
+        }
+    }
+}
+
+fn shift_numbered_registers(editor: &mut Editor) {
+    for i in (1..=8u32).rev() {
+        let from = char::from_digit(i, 10).unwrap_or('1');
+        let to = char::from_digit(i + 1, 10).unwrap_or('9');
+        if let Some(v) = editor.registers.joined(from) {
+            editor.registers.write(to, v);
+        }
+    }
+}
+
+/// Text a paste should insert from a register
+/// (joined for `"A` appends; `+` reads the system
+/// clipboard).
+pub(crate) fn register_text(editor: &Editor, reg: char) -> Option<String> {
+    if reg == '+' {
+        clipboard_get()
+    } else {
+        editor.registers.joined(reg)
+    }
+}
+
+fn clipboard_set(text: &str) {
+    if let Ok(mut cb) = arboard::Clipboard::new() {
+        drop(cb.set_text(text.to_owned()));
+    }
+}
+
+fn clipboard_get() -> Option<String> {
+    arboard::Clipboard::new().ok()?.get_text().ok()
+}
+
 // ── Paste ─────────────────────────────────────────
 
 pub(crate) fn paste(editor: &mut Editor, before: bool, count: usize) {
     let reg = editor.yank_register;
-    let Some(text) = editor.registers.read(reg).map(ToString::to_string)
-    else {
+    let Some(text) = register_text(editor, reg) else {
         return;
     };
 
@@ -1582,6 +1654,9 @@ pub(crate) fn delete_char_at_cursor(editor: &mut Editor, count: usize) {
     if del_count == 0 {
         return;
     }
+    let text: String =
+        editor.document.text.slice(pos..pos + del_count).chars().collect();
+    store_yank(editor, text, true);
     let txn = Transaction::delete(pos, del_count);
     let inv = txn.invert(&editor.document.text);
     if editor.document.apply_transaction(&txn).is_ok() {

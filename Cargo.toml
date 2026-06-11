@@ -30,6 +30,7 @@ tokio-stream = "0.1"
 nucleo = "0.5"
 ignore = "0.4"
 regex = "1"
+arboard = "3"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

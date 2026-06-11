@@ -1,7 +1,8 @@
 M1 — Vim Modal Editing
 =======================
 Status: IN PROGRESS
-Next up: M1d remainder (named registers a-z, clipboard) or M1e
+Next up: M1g (ex command line: :s///, ranges, :e) or M1f
+(macros + dot repeat, skipped for now per user)
 
 Architecture: Enum state machine (VimMachine) in ms-view.
 Each keypress → feed(key) → Option<Action>. No callbacks.
@@ -79,22 +80,24 @@ Verify: ci" changes inside quotes, viwd deletes word, Vjd ✓
 
 ---
 
-M1d — Undo/Redo Tree + Registers                       [PARTIAL]
+M1d — Undo/Redo Tree + Registers                          [DONE*]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Already landed: ms-core/src/history.rs (u/Ctrl-R wired),
-ms-view/src/register.rs (unnamed register wired for y/d/p).
-Remaining: register *selection* grammar ("a-z, "0-9, "+, "_),
-clipboard via arboard, branch undo if history is linear.
+History (u/Ctrl-R) + full register grammar landed:
+- "x select via Action::SelectRegister; applies to the
+  next op only, count survives ("a3dd == 3"add). Works
+  in visual mode ("+y from visual = user's keymap).
+- Routing in ms-term commands.rs store_yank(): named
+  "a-z (A-Z appends, paste joins), yank → "0, linewise
+  deletes shift "1-9, small deletes → "-, "_ discards,
+  "+ system clipboard (arboard, errors silent), unnamed
+  always mirrors. x/s now fill registers too.
+Behavior verified against nvim -u NONE headless.
 
-New: ms-core/src/history.rs — tree-based undo
-     ms-core/src/register.rs — RegisterStore
+Deferred: branch/tree undo (history is linear undo
+stack), "% "." ": readonly registers, "* (primary),
+clipboard feature gate (always on).
 
-Undo tree: nodes with parent/children, inversion
-Registers: named ("a-z), unnamed (""), numbered ("0-9),
-           clipboard ("+), black hole ("_)
-Dep: arboard (clipboard, feature-gated)
-
-Verify: u undoes, Ctrl-R redoes, "ayy + "ap works, branch undo
+Verify: u undoes, Ctrl-R redoes, "ayy + "ap works ✓
 
 ---
 
